@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mvn clean *)",
+      "Bash(zcat ~/.album-organizer/cache.json.gz)",
+      "Bash(gunzip -c ~/.album-organizer/cache.json.gz)",
+      "Bash(mvn compile *)"
+    ]
+  }
+}

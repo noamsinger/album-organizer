@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<BorderPane xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml/1"
+            fx:controller="com.albumorganizer.controller.MainController"
+            fx:id="rootPane"
+            stylesheets="@../styles.css">
+
+    <!-- Top: Menu Bar -->
+    <top>
+        <MenuBar useSystemMenuBar="false" styleClass="menu-bar">
+            <Menu text="File">
+                <MenuItem text="Add Album Folder" onAction="#onSelectFolders" fx:id="menuSelectFolders"/>
+                <MenuItem text="Add Target Folder" onAction="#onAddTargetFolder"/>
+                <SeparatorMenuItem/>
+                <MenuItem text="Settings..." onAction="#onSettings"/>
+                <SeparatorMenuItem/>
+                <MenuItem text="Exit" onAction="#onExit"/>
+            </Menu>
+            <Menu text="View">
+                <RadioMenuItem text="List View" fx:id="listViewMenuItem" onAction="#onListView" selected="true">
+                    <toggleGroup>
+                        <ToggleGroup fx:id="viewToggleGroup"/>
+                    </toggleGroup>
+                </RadioMenuItem>
+                <RadioMenuItem text="Thumbnail View" fx:id="thumbnailViewMenuItem" onAction="#onThumbnailView" toggleGroup="$viewToggleGroup"/>
+                <SeparatorMenuItem/>
+                <CheckMenuItem text="Show Progress Panel" fx:id="showProgressPanelMenuItem" onAction="#onToggleProgressPanel"/>
+                <SeparatorMenuItem/>
+                <MenuItem text="Increase Font Size" onAction="#onIncreaseFontSize"/>
+                <MenuItem text="Decrease Font Size" onAction="#onDecreaseFontSize"/>
+                <MenuItem text="Reset Font Size" onAction="#onResetFontSize"/>
+            </Menu>
+            <Menu text="Help">
+                <MenuItem text="About" onAction="#onAbout"/>
+            </Menu>
+        </MenuBar>
+    </top>
+
+    <!-- Center: Split Pane with Tree and Table -->
+    <center>
+        <SplitPane fx:id="mainSplitPane" dividerPositions="0.3">
+            <!-- Left: Directory Tree -->
+            <AnchorPane>
+                <TreeView fx:id="directoryTree" AnchorPane.topAnchor="0" AnchorPane.bottomAnchor="0"
+                          AnchorPane.leftAnchor="0" AnchorPane.rightAnchor="0"/>
+            </AnchorPane>
+
+            <!-- Right: Media Views (Table or Thumbnail) -->
+            <AnchorPane fx:id="mediaViewContainer">
+                <!-- List View (Table) -->
+                <TableView fx:id="mediaTable" AnchorPane.topAnchor="0" AnchorPane.bottomAnchor="0"
+                           AnchorPane.leftAnchor="0" AnchorPane.rightAnchor="0" visible="true">
+                    <columns>
+                        <TableColumn fx:id="filenameColumn" text="Filename" prefWidth="200"/>
+                        <TableColumn fx:id="dateColumn" text="Date" prefWidth="150"/>
+                        <TableColumn fx:id="dateTakenColumn" text="Date Taken (UTC)" prefWidth="170"/>
+                        <TableColumn fx:id="typeColumn" text="Type" prefWidth="80"/>
+                        <TableColumn fx:id="durationColumn" text="Duration" prefWidth="100"/>
+                        <TableColumn fx:id="sizeColumn" text="Size" prefWidth="100"/>
+                        <TableColumn fx:id="resolutionColumn" text="Resolution" prefWidth="120"/>
+                        <TableColumn fx:id="locationColumn" text="Location" prefWidth="250"/>
+                        <TableColumn fx:id="hashColumn" text="Hash" prefWidth="150"/>
+                    </columns>
+                </TableView>
+
+                <!-- Thumbnail View (ScrollPane with FlowPane) -->
+                <ScrollPane fx:id="thumbnailScrollPane" AnchorPane.topAnchor="0" AnchorPane.bottomAnchor="0"
+                           AnchorPane.leftAnchor="0" AnchorPane.rightAnchor="0" visible="false"
+                           fitToWidth="true" style="-fx-background-color: #f5f5f5;">
+                    <content>
+                        <javafx.scene.layout.FlowPane fx:id="thumbnailPane" hgap="10" vgap="10"
+                                                      style="-fx-padding: 10; -fx-background-color: #f5f5f5;"/>
+                    </content>
+                </ScrollPane>
+            </AnchorPane>
+        </SplitPane>
+    </center>
+
+    <!-- Bottom: Status Bar and Progress Panel -->
+    <bottom>
+        <VBox>
+            <!-- Progress Panel -->
+            <VBox fx:id="progressPanel" visible="false" managed="false" styleClass="progress-panel" style="-fx-border-width: 1 0 0 0;">
+                <!-- Activity Log -->
+                <ListView fx:id="progressLogList" prefHeight="120"
+                          style="-fx-font-size: 11px; -fx-font-family: monospace; -fx-background-color: #f8f8f8;"/>
+                <!-- Buttons row with progress bar on the left -->
+                <HBox styleClass="progress-buttons" spacing="10" alignment="CENTER_RIGHT">
+                    <ProgressBar fx:id="progressBar" prefHeight="16" progress="0"
+                                 visible="false" managed="false"
+                                 HBox.hgrow="ALWAYS" maxWidth="Infinity"
+                                 style="-fx-accent: #4a90d9;"/>
+                    <Button fx:id="viewReportButton" text="View Report" onAction="#onViewReport" disable="true"/>
+                    <Button fx:id="stopProgressButton" text="Stop" onAction="#onStopProgress" disable="true"/>
+                    <Button fx:id="hideProgressButton" text="Hide" onAction="#onHideProgress"/>
+                </HBox>
+            </VBox>
+
+            <!-- Status Bar -->
+            <HBox styleClass="status-bar" spacing="10" style="-fx-padding: 5;">
+                <Label fx:id="statusLabel" text="Ready"/>
+                <Region HBox.hgrow="ALWAYS"/>
+                <Label fx:id="fileCountLabel" text="0 files"/>
+                <Separator orientation="VERTICAL"/>
+                <Label fx:id="errorCountLabel" text="0 errors"/>
+            </HBox>
+        </VBox>
+    </bottom>
+
+</BorderPane>
