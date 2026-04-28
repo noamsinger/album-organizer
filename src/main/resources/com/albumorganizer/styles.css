@@ -1,0 +1,232 @@
+/* Album Organizer Styles */
+
+.root {
+    -fx-font-family: "System";
+    -fx-font-size: 13px;
+    -fx-base: #FFE5CC; /* Pale orange window frame color */
+}
+
+/* Custom Title Bar */
+.custom-title-bar {
+    -fx-background-color: #FFE5CC; /* Pale orange */
+    -fx-padding: 6 10;
+    -fx-border-color: #d0d0d0;
+    -fx-border-width: 0 0 1 0;
+}
+
+.title-label {
+    -fx-font-weight: bold;
+    -fx-font-size: 13px;
+    -fx-text-fill: #333333;
+}
+
+.title-button {
+    -fx-background-color: transparent;
+    -fx-text-fill: #333333;
+    -fx-font-size: 14px;
+    -fx-padding: 2 8;
+    -fx-background-radius: 3px;
+    -fx-cursor: hand;
+    -fx-min-width: 30px;
+    -fx-pref-width: 30px;
+}
+
+.title-button:hover {
+    -fx-background-color: rgba(0, 0, 0, 0.1);
+}
+
+.title-button.close-button:hover {
+    -fx-background-color: #e81123;
+    -fx-text-fill: white;
+}
+
+/* Window decorations (title bar) */
+.decoration {
+    -fx-background-color: #FFE5CC; /* Pale orange */
+}
+
+.decorator {
+    -fx-background-color: #FFE5CC; /* Pale orange */
+}
+
+/* Status Bar */
+.status-bar {
+    -fx-padding: 5px 10px;
+    -fx-background-color: #FFE5CC; /* Pale orange */
+    -fx-border-color: #d0d0d0;
+    -fx-border-width: 1px 0 0 0;
+}
+
+/* Table View */
+.table-view {
+    -fx-background-color: white;
+}
+
+.table-view .column-header {
+    -fx-background-color: #e8e8e8;
+    -fx-font-weight: bold;
+}
+
+/* Normal row styling */
+.table-row-cell {
+    -fx-background-color: white;
+    -fx-text-fill: black;
+}
+
+/* Selected row - dark blue background with white text (for normal files) */
+.table-row-cell:selected {
+    -fx-background-color: #00008B !important; /* dark blue */
+    -fx-text-fill: white !important;
+}
+
+.table-row-cell:selected .table-cell {
+    -fx-text-fill: white !important;
+}
+
+.table-row-cell:selected .table-cell .text {
+    -fx-fill: white !important;
+}
+
+/* Duplicate files - yellow background */
+.table-row-cell.duplicate {
+    -fx-background-color: #fff9c4 !important;
+}
+
+/* Duplicate selected - dark blue background with strong yellow text */
+.table-row-cell.duplicate:selected {
+    -fx-background-color: #00008B !important; /* dark blue */
+    -fx-text-fill: #FFD700 !important; /* strong yellow (gold) */
+}
+
+.table-row-cell.duplicate:selected .table-cell {
+    -fx-text-fill: #FFD700 !important;
+}
+
+.table-row-cell.duplicate:selected .table-cell .text {
+    -fx-fill: #FFD700 !important;
+}
+
+/* Corrupted files - pale red background with black text */
+.table-row-cell.corrupted {
+    -fx-background-color: #ffcccc !important; /* pale red */
+    -fx-text-fill: black !important;
+}
+
+.table-row-cell.corrupted .text {
+    -fx-fill: black !important;
+}
+
+.table-row-cell.corrupted .table-cell {
+    -fx-text-fill: black !important;
+}
+
+.table-row-cell.corrupted .table-cell .text {
+    -fx-fill: black !important;
+}
+
+/* Corrupted selected - dark blue background with strong pink text */
+.table-row-cell.corrupted:selected {
+    -fx-background-color: #00008B !important; /* dark blue */
+    -fx-text-fill: #FF1493 !important; /* strong pink (deep pink) */
+}
+
+.table-row-cell.corrupted:selected .table-cell {
+    -fx-text-fill: #FF1493 !important;
+}
+
+.table-row-cell.corrupted:selected .table-cell .text {
+    -fx-fill: #FF1493 !important;
+}
+
+/* Tree View */
+.tree-view {
+    -fx-background-color: white;
+}
+
+.tree-cell {
+    -fx-padding: 4px;
+}
+
+.tree-cell:selected {
+    -fx-background-color: #0096c9;
+    -fx-text-fill: white;
+}
+
+/* Menu Bar */
+.menu-bar {
+    -fx-background-color: #FFE5CC; /* Pale orange */
+}
+
+.menu:hover, .menu:showing {
+    -fx-background-color: #e0e0e0;
+}
+
+/* Progress Dialog */
+.progress-panel {
+    -fx-background-color: #FFE5CC; /* Pale orange */
+    -fx-border-color: #d0d0d0;
+}
+
+.progress-buttons {
+    -fx-padding: 6 10;
+    -fx-background-color: #FFE5CC; /* Pale orange */
+}
+
+.progress-dialog {
+    -fx-padding: 20px;
+}
+
+.progress-dialog .progress-bar {
+    -fx-pref-width: 400px;
+}
+
+.progress-dialog .label {
+    -fx-padding: 10px 0;
+}
+
+/* Buttons */
+.button {
+    -fx-background-color: #2196f3;
+    -fx-text-fill: white;
+    -fx-padding: 8px 16px;
+    -fx-background-radius: 4px;
+    -fx-cursor: hand;
+}
+
+.button:hover {
+    -fx-background-color: #1976d2;
+}
+
+.button:pressed {
+    -fx-background-color: #0d47a1;
+}
+
+.button:disabled {
+    -fx-opacity: 0.5;
+    -fx-cursor: default;
+}
+
+/* Context Menu */
+.context-menu {
+    -fx-background-color: white;
+    -fx-border-color: #d0d0d0;
+    -fx-border-width: 1px;
+}
+
+.context-menu .menu-item {
+    -fx-padding: 6px 12px;
+}
+
+.context-menu .menu-item:hover {
+    -fx-background-color: #e3f2fd;
+}
+
+/* Split Pane */
+.split-pane {
+    -fx-background-color: white;
+}
+
+.split-pane-divider {
+    -fx-background-color: #d0d0d0;
+    -fx-padding: 0 1px 0 1px;
+}
