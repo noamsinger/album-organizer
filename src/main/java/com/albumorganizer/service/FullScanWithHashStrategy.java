@@ -264,7 +264,13 @@ public class FullScanWithHashStrategy {
                 if (type == MediaType.VIDEO) {
                     Long duration = metadataService.getVideoDuration(file);
                     mediaFile.setDurationSeconds(duration);
-                    logger.info("Set duration for {}: {} seconds", file.getFileName(), duration);
+                    logger.debug("Set duration for {}: {} seconds", file.getFileName(), duration);
+                    int rotation = metadataService.getVideoRotation(file);
+                    if (rotation != 0) {
+                        mediaFile.setOrientation(rotation);
+                    }
+                } else {
+                    mediaFile.setOrientation(metadataService.getOrientation(file));
                 }
             } else {
                 logger.warn("File appears to be corrupted or invalid: {}", file);

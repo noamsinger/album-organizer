@@ -41,6 +41,11 @@
             <artifactId>javafx-fxml</artifactId>
             <version>${javafx.version}</version>
         </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-swing</artifactId>
+            <version>${javafx.version}</version>
+        </dependency>
 
         <!-- Metadata Extraction -->
         <dependency>
@@ -69,6 +74,13 @@
             <groupId>com.google.code.gson</groupId>
             <artifactId>gson</artifactId>
             <version>2.10.1</version>
+        </dependency>
+
+        <!-- Video frame extraction and HEIC decoding -->
+        <dependency>
+            <groupId>org.bytedeco</groupId>
+            <artifactId>javacv-platform</artifactId>
+            <version>1.5.10</version>
         </dependency>
 
         <!-- Logging -->
@@ -186,7 +198,7 @@
                 </executions>
             </plugin>
 
-            <!-- JPackage Plugin (Native Installers) -->
+            <!-- JPackage Plugin (Native App Bundles) -->
             <plugin>
                 <groupId>org.panteleyev</groupId>
                 <artifactId>jpackage-maven-plugin</artifactId>
@@ -203,21 +215,10 @@
                     <javaOptions>
                         <option>-Dfile.encoding=UTF-8</option>
                         <option>-Dapple.awt.application.name=Album Organizer</option>
+                        <option>--add-modules=javafx.controls,javafx.fxml,javafx.swing</option>
                     </javaOptions>
-
-                    <!-- macOS specific -->
                     <macPackageName>Album Organizer</macPackageName>
                     <macPackageIdentifier>com.albumorganizer</macPackageIdentifier>
-
-                    <!-- Windows specific -->
-                    <winMenu>true</winMenu>
-                    <winDirChooser>true</winDirChooser>
-                    <winShortcut>true</winShortcut>
-                    <winMenuGroup>Album Organizer</winMenuGroup>
-
-                    <!-- Linux specific -->
-                    <linuxShortcut>true</linuxShortcut>
-                    <linuxMenuGroup>Graphics</linuxMenuGroup>
                 </configuration>
             </plugin>
         </plugins>

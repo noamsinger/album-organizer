@@ -8,7 +8,12 @@ A cross-platform desktop application for scanning, organizing, and managing imag
 - **Pale Orange Theme**: Custom pale orange (#FFE5CC) color scheme for window frames, menu bar, status bar, and progress panel
 - **Multiple View Modes**: 
   - **List View**: Detailed table with sortable columns
-  - **Thumbnail View**: Visual grid of thumbnails
+  - **Thumbnail View**: Visual grid of thumbnails with loading spinners
+    - Per-file progress indicators during thumbnail generation
+    - Two-pass progress bar: file reading (0-100%) then thumbnail loading (0-100%)
+    - Automatic video frame rotation using FFmpeg displaymatrix
+    - HEIC support via macOS sips conversion
+    - LRU disk cache (42MB max) at `~/.album-organizer/thumbnails/`
 - **Smart Scanning**: 
   - **Full Scan with Hash**: Complete recursive scan with SHA-1 hash calculation
     - Smart hash recalculation: only rehashes new, modified, or unhashed files
@@ -39,6 +44,7 @@ A cross-platform desktop application for scanning, organizing, and managing imag
   - Memory-optimized duplicate index using HashMap with shared directory paths
 - **File Organization**:
   - Organize single files or entire folder trees to target folder
+  - Folder tree context menu: "Do Magic" > "Organize Folder Recursively"
   - Automatic folder structure: Year/Month/Day based on date taken
   - Resolution-based splitting: low-res/med-res folders (high-res files at root)
   - Collision detection with hash verification and automatic filename suffixing
@@ -54,9 +60,11 @@ A cross-platform desktop application for scanning, organizing, and managing imag
   - Resolution-based splitting (low-res/med-res/high-res)
   - Customizable pixel thresholds with validation
 - **Progress Panel**: Real-time progress tracking for scans and organize operations
+  - Two-pass progress for folder view: scan phase then thumbnail phase
   - Shows discovered files during operations
   - Stop button to cancel operations mid-process
   - Collapsible panel with hide/show toggle
+  - "View Last Organizing Report" button — persists across scans, writes report to `/tmp/album-organizer-reports/` on demand
 - **Efficient Caching**: 
   - Single global snapshot cache (`~/.album-organizer/cache.json.gz`)
   - Compressed JSON format with GZIP for fast startup
@@ -77,25 +85,32 @@ A cross-platform desktop application for scanning, organizing, and managing imag
 
 ## Installation
 
-### Option 1: Native Installers (Recommended)
+### macOS (Recommended)
 
-Download the appropriate installer for your platform:
-
-- **Windows**: `album-organizer-setup.msi` or `album-organizer-setup.exe`
-- **macOS**: `album-organizer.dmg` or `album-organizer.pkg`
-- **Linux**: `album-organizer.deb` (Debian/Ubuntu) or `album-organizer.rpm` (Fedora/RHEL)
-
-Run the installer and follow the on-screen instructions.
-
-### Option 2: Running from JAR
-
-If you prefer to run from the JAR file or native installers are not available:
+Build and install from source:
 
 ```bash
-java -jar album-organizer.jar
+# Build the application and create installer
+./build.sh
+
+# Run the app
+open "target/dist/Album Organizer.app"
+
+# Or install from the DMG
+open "target/dist/Album Organizer-1.1.0.dmg"
 ```
 
-Make sure Java 17+ is installed and available in your PATH.
+macOS handles single-instance natively — double-clicking the app while it's already running will bring the existing window to front.
+
+### Windows
+
+```bash
+# Build and package
+build.bat
+
+# Run the app
+start "target\dist\Album Organizer\Album Organizer.exe"
+```
 
 ## Usage
 
@@ -124,10 +139,10 @@ Make sure Java 17+ is installed and available in your PATH.
 - **Album folders** are displayed in bold
 - **Target folder** is displayed in purple and bold
 - Click a folder to filter the table view to files in that directory
-- Right-click for options: Full Scan with Hash, Quick Scan, Open in file browser, Organize Folder Recursively, Make Target Folder, Unset as Target Folder, Remove from Album Folders
+- Right-click for options: Full Scan with Hash, Quick Scan, Open in file browser, Do Magic > Organize Folder Recursively, Make Target Folder, Unset as Target Folder, Remove from Album Folders
 - Context menu items are always visible (disabled when not applicable) for consistent UX
 - Tree selection is preserved across scans and operations
-- Right-click for options: Deep Scan, Quick Scan, Open in file browser, Organize Folder Recursively, Make Target Folder, Unset as Target Folder, Remove from Album Folders
+- At startup, tree expands to last viewed folder without selecting it (avoids interrupting startup scan)
 
 #### Right Panel: File Table
 - Displays all scanned image and video files with columns:
@@ -202,7 +217,7 @@ All settings are persisted in `~/.album-organizer/album-organizer-config.ini`
 - Handles collisions with hash verification
 - Auto-refreshes views to show organized files
 
-**Organize Folder Recursively** (Right-click folder → Organize Folder Recursively):
+**Organize Folder Recursively** (Right-click folder → Do Magic → Organize Folder Recursively):
 - Requires target folder to be set and folder must have files
 - Shows confirmation dialog with file count
 - Recursively organizes all media files in folder and subdirectories
@@ -226,7 +241,8 @@ Access via `View > Show Progress Panel` or automatically shown during operations
 
 - **Shows**: Real-time file discovery and processing
 - **Scrolling list**: Recently discovered/processed files
-- **Progress bar**: Visual progress indicator
+- **Progress bar**: Two-pass visual progress (scan then thumbnails)
+- **View Last Organizing Report**: Opens report file from `/tmp/album-organizer-reports/`
 - **Status text**: Current operation and counts
 - **Stop button**: Cancel operation (enabled during active operations)
 - **Hide button**: Collapse panel (always enabled)
@@ -361,31 +377,23 @@ hiResThresholdPixels=1000000
 
 ## Building from Source
 
-See [design.md](design.md) and [plan.md](plan.md) for architecture details and build instructions.
+See [design.md](design.md) and [plan.md](plan.md) for architecture details.
 
 ```bash
 # Clone repository
 git clone <repository-url>
 cd album-organizer
 
-# Build with Maven (includes run.sh/run.bat scripts)
-mvn clean package
+# Build application and create installer (.app + .dmg)
+./build.sh              # macOS
+build.bat               # Windows
 
-# Run application (Unix/macOS)
-./run.sh
+# Run the app (macOS)
+open "target/dist/Album Organizer.app"
 
-# Run application (Windows)
-run.bat
-
-# Note: run scripts automatically stop previous instances gracefully before starting
-
-# Or run manually with Java
-java --module-path target/lib --add-modules javafx.controls,javafx.fxml \
-  -cp "target/album-organizer-1.0.0.jar:target/lib/*" \
-  com.albumorganizer.AlbumOrganizerApp
-
-# Create native installer
-mvn jpackage:jpackage
+# Output:
+#   target/dist/Album Organizer.app      - macOS app bundle
+#   target/dist/Album Organizer-1.1.0.dmg - macOS installer
 ```
 
 ## Contributing

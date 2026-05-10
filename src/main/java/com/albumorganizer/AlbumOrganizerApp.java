@@ -7,6 +7,8 @@ import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.stage.Stage;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.LoggerContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -56,7 +58,7 @@ public class AlbumOrganizerApp extends Application {
             try {
                 String stylesheet = getClass().getResource("/com/albumorganizer/styles.css").toExternalForm();
                 scene.getStylesheets().add(stylesheet);
-                logger.info("Loaded stylesheet: {}", stylesheet);
+                logger.debug("Loaded stylesheet: {}", stylesheet);
             } catch (Exception e) {
                 logger.error("Failed to load stylesheet", e);
             }
@@ -75,25 +77,34 @@ public class AlbumOrganizerApp extends Application {
 
             // Save window size and position on close, and save snapshot
             primaryStage.setOnCloseRequest(event -> {
-                logger.info("Window close requested");
+                logger.debug("Window close requested");
                 try {
                     configRepository.setWindowWidth(primaryStage.getWidth());
                     configRepository.setWindowHeight(primaryStage.getHeight());
                     configRepository.setWindowX(primaryStage.getX());
                     configRepository.setWindowY(primaryStage.getY());
-                    logger.info("Window position saved");
+                    logger.debug("Window position saved");
 
-                    // Save snapshot before closing
+                    // Save snapshot with timeout to prevent hang
                     if (mainController != null) {
-                        logger.info("Calling saveSnapshotOnShutdown");
-                        mainController.saveSnapshotOnShutdown();
-                        logger.info("Snapshot saved on window close");
-                    } else {
-                        logger.warn("MainController is null, cannot save snapshot");
+                        Thread saveThread = new Thread(() -> {
+                            try {
+                                mainController.saveSnapshotOnShutdown();
+                            } catch (Exception e) {
+                                logger.error("Error saving snapshot", e);
+                            }
+                        });
+                        saveThread.setDaemon(true);
+                        saveThread.start();
+                        saveThread.join(5000);
+                        if (saveThread.isAlive()) {
+                            logger.warn("Snapshot save timed out after 5s, exiting anyway");
+                        }
                     }
                 } catch (Exception e) {
                     logger.error("Error during window close", e);
                 }
+                System.exit(0);
             });
 
             primaryStage.show();
@@ -108,20 +119,37 @@ public class AlbumOrganizerApp extends Application {
     @Override
     public void stop() {
         logger.info("Stopping Album Organizer application");
-        // Additional cleanup can happen here
     }
 
     public static void main(String[] args) {
         // Set macOS application name (appears in menu bar)
-        // This must be set before Application.launch()
         System.setProperty("apple.awt.application.name", "Album Organizer");
-
-        // Also try the alternative property
         System.setProperty("com.apple.mrj.application.apple.menu.about.name", "Album Organizer");
+
+        // Set macOS Dock icon
+        try {
+            if (java.awt.Taskbar.isTaskbarSupported()) {
+                java.awt.Taskbar taskbar = java.awt.Taskbar.getTaskbar();
+                java.awt.Image dockIcon = javax.imageio.ImageIO.read(
+                        AlbumOrganizerApp.class.getResourceAsStream("/app-icon.png"));
+                taskbar.setIconImage(dockIcon);
+            }
+        } catch (Exception e) {
+            // Ignore - Dock icon is cosmetic
+        }
 
         // Enable custom window appearance on macOS
         System.setProperty("prism.order", "sw");
         System.setProperty("glass.win.uiScale", "1.0");
+
+        for (String arg : args) {
+            if ("--debug".equals(arg)) {
+                LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
+                loggerContext.getLogger("com.albumorganizer").setLevel(Level.DEBUG);
+                LoggerFactory.getLogger(AlbumOrganizerApp.class).info("Debug logging enabled via --debug flag");
+                break;
+            }
+        }
 
         launch(args);
     }

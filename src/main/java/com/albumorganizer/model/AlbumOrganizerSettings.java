@@ -21,6 +21,8 @@ public class AlbumOrganizerSettings {
     private int hiResThresholdPixels;
     private Path targetFolder; // The designated target folder
     private int fontSizeFactor; // Font size factor for scaling (0 = 100%)
+    private String lastSelectedFolder; // Last selected folder path (for session restore)
+    private boolean thumbnailView; // True if thumbnail view was active
 
     public AlbumOrganizerSettings() {
         // Defaults
@@ -34,6 +36,8 @@ public class AlbumOrganizerSettings {
         this.hiResThresholdPixels = 1000000;
         this.targetFolder = null;
         this.fontSizeFactor = 0;
+        this.lastSelectedFolder = null;
+        this.thumbnailView = false;
     }
 
     public OrganizeMode getMode() {
@@ -114,5 +118,21 @@ public class AlbumOrganizerSettings {
 
     public void setFontSizeFactor(int fontSizeFactor) {
         this.fontSizeFactor = fontSizeFactor;
+    }
+
+    public String getLastSelectedFolder() {
+        return lastSelectedFolder;
+    }
+
+    public void setLastSelectedFolder(String lastSelectedFolder) {
+        this.lastSelectedFolder = lastSelectedFolder;
+    }
+
+    public boolean isThumbnailView() {
+        return thumbnailView;
+    }
+
+    public void setThumbnailView(boolean thumbnailView) {
+        this.thumbnailView = thumbnailView;
     }
 }

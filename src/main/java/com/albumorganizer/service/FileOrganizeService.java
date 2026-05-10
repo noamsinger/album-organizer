@@ -35,7 +35,7 @@ public class FileOrganizeService {
      * @return result of the organization operation
      */
     public OrganizeResult organizeFile(MediaFile mediaFile, AlbumOrganizerSettings settings) {
-        logger.info("Organizing file: {}", mediaFile.getFilename());
+        logger.debug("Organizing file: {}", mediaFile.getFilename());
 
         try {
             // Build target path
@@ -66,7 +66,7 @@ public class FileOrganizeService {
             boolean isCopyMode = (settings.getMode() == AlbumOrganizerSettings.OrganizeMode.COPY);
             if (isCopyMode) {
                 Files.copy(mediaFile.getAbsolutePath(), targetPath, StandardCopyOption.REPLACE_EXISTING);
-                logger.info("Copied file to: {}", targetPath);
+                logger.debug("Copied file to: {}", targetPath);
                 return OrganizeResult.success(targetPath);
             } else {
                 return moveFileWithVerification(mediaFile.getAbsolutePath(), targetPath);
@@ -231,7 +231,7 @@ public class FileOrganizeService {
 
             // Step 4: Delete original only if verification succeeded
             Files.delete(source);
-            logger.info("Moved file with verification to: {}", target);
+            logger.debug("Moved file with verification to: {}", target);
             return OrganizeResult.success(target);
 
         } catch (Exception e) {

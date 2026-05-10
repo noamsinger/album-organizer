@@ -287,6 +287,32 @@ public class MetadataService {
                 }
             }
 
+            // Try QuickTimeDirectory for MOV files
+            QuickTimeDirectory qtDir = metadata.getFirstDirectoryOfType(QuickTimeDirectory.class);
+            if (qtDir != null) {
+                Date creationDate = qtDir.getDate(QuickTimeDirectory.TAG_CREATION_TIME);
+                if (creationDate != null) {
+                    Instant instant = creationDate.toInstant();
+                    if (isValidDateRange(instant)) {
+                        logger.debug("Extracted creation date from QuickTime metadata for: {}", file.getFileName());
+                        return instant;
+                    }
+                }
+            }
+
+            // Try Mp4Directory for MP4 files
+            Mp4Directory mp4Dir = metadata.getFirstDirectoryOfType(Mp4Directory.class);
+            if (mp4Dir != null) {
+                Date creationDate = mp4Dir.getDate(Mp4Directory.TAG_CREATION_TIME);
+                if (creationDate != null) {
+                    Instant instant = creationDate.toInstant();
+                    if (isValidDateRange(instant)) {
+                        logger.debug("Extracted creation date from MP4 metadata for: {}", file.getFileName());
+                        return instant;
+                    }
+                }
+            }
+
         } catch (ImageProcessingException | IOException e) {
             logger.debug("Could not extract date taken from {}: {}", file, e.getMessage());
         }
@@ -366,6 +392,80 @@ public class MetadataService {
             logger.debug("Could not extract video duration from {}: {}", file, e.getMessage());
         }
         return null;
+    }
+
+    /**
+     * Gets the EXIF orientation value from an image file.
+     *
+     * @param file the image file
+     * @return orientation value (1-8), or 1 if unavailable
+     */
+    public int getOrientation(Path file) {
+        try {
+            Metadata metadata = ImageMetadataReader.readMetadata(file.toFile());
+            ExifIFD0Directory exifDir = metadata.getFirstDirectoryOfType(ExifIFD0Directory.class);
+            if (exifDir != null && exifDir.containsTag(ExifIFD0Directory.TAG_ORIENTATION)) {
+                int orientation = exifDir.getInt(ExifIFD0Directory.TAG_ORIENTATION);
+                if (orientation >= 1 && orientation <= 8) {
+                    return orientation;
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("Could not extract orientation from {}: {}", file, e.getMessage());
+        }
+        return 1;
+    }
+
+    /**
+     * Gets the rotation angle from video metadata (MOV/MP4).
+     * Uses FFmpeg's displaymatrix (most reliable), falls back to metadata-extractor tags.
+     *
+     * @param file the video file
+     * @return rotation in degrees (0, 90, 180, 270), or 0 if unavailable
+     */
+    public int getVideoRotation(Path file) {
+        // Primary: use FFmpeg displaymatrix via javacv (most reliable for iPhone MOVs)
+        try (org.bytedeco.javacv.FFmpegFrameGrabber grabber =
+                     new org.bytedeco.javacv.FFmpegFrameGrabber(file.toFile())) {
+            grabber.setVideoStream(0);
+            grabber.setAudioStream(-1);
+            grabber.start();
+            double displayRotation = grabber.getDisplayRotation();
+            grabber.stop();
+            if (displayRotation != 0.0) {
+                return normalizeRotation((int) Math.round(-displayRotation));
+            }
+        } catch (Exception e) {
+            logger.debug("FFmpeg rotation check failed for {}: {}", file.getFileName(), e.getMessage());
+        }
+
+        // Fallback: metadata-extractor tags
+        try {
+            Metadata metadata = ImageMetadataReader.readMetadata(file.toFile());
+
+            QuickTimeDirectory qtDir = metadata.getFirstDirectoryOfType(QuickTimeDirectory.class);
+            if (qtDir != null && qtDir.containsTag(270)) {
+                int rotation = qtDir.getInt(270);
+                return normalizeRotation(rotation);
+            }
+
+            Mp4Directory mp4Dir = metadata.getFirstDirectoryOfType(Mp4Directory.class);
+            if (mp4Dir != null && mp4Dir.containsTag(512)) {
+                int rotation = mp4Dir.getInt(512);
+                return normalizeRotation(rotation);
+            }
+        } catch (Exception e) {
+            logger.debug("Could not extract video rotation from {}: {}", file, e.getMessage());
+        }
+        return 0;
+    }
+
+    private int normalizeRotation(int degrees) {
+        int normalized = ((degrees % 360) + 360) % 360;
+        if (normalized == 90 || normalized == 180 || normalized == 270) {
+            return normalized;
+        }
+        return 0;
     }
 
     /**

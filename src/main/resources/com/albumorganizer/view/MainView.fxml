@@ -27,6 +27,19 @@
                 </RadioMenuItem>
                 <RadioMenuItem text="Thumbnail View" fx:id="thumbnailViewMenuItem" onAction="#onThumbnailView" toggleGroup="$viewToggleGroup"/>
                 <SeparatorMenuItem/>
+                <Menu text="Sort By">
+                    <RadioMenuItem text="Name" fx:id="sortByNameMenuItem" onAction="#onSortByName" selected="true">
+                        <toggleGroup>
+                            <ToggleGroup fx:id="sortToggleGroup"/>
+                        </toggleGroup>
+                    </RadioMenuItem>
+                    <RadioMenuItem text="Date Taken" fx:id="sortByDateTakenMenuItem" onAction="#onSortByDateTaken" toggleGroup="$sortToggleGroup"/>
+                    <RadioMenuItem text="Date Modified" fx:id="sortByDateMenuItem" onAction="#onSortByDate" toggleGroup="$sortToggleGroup"/>
+                    <RadioMenuItem text="Type" fx:id="sortByTypeMenuItem" onAction="#onSortByType" toggleGroup="$sortToggleGroup"/>
+                    <RadioMenuItem text="Duration" fx:id="sortByDurationMenuItem" onAction="#onSortByDuration" toggleGroup="$sortToggleGroup"/>
+                    <RadioMenuItem text="Resolution" fx:id="sortByResolutionMenuItem" onAction="#onSortByResolution" toggleGroup="$sortToggleGroup"/>
+                </Menu>
+                <SeparatorMenuItem/>
                 <CheckMenuItem text="Show Progress Panel" fx:id="showProgressPanelMenuItem" onAction="#onToggleProgressPanel"/>
                 <SeparatorMenuItem/>
                 <MenuItem text="Increase Font Size" onAction="#onIncreaseFontSize"/>
@@ -34,6 +47,16 @@
                 <MenuItem text="Reset Font Size" onAction="#onResetFontSize"/>
             </Menu>
             <Menu text="Help">
+                <Menu text="Log Level">
+                    <RadioMenuItem text="Debug" fx:id="logLevelDebugMenuItem" onAction="#onSetLogLevelDebug">
+                        <toggleGroup>
+                            <ToggleGroup fx:id="logLevelToggleGroup"/>
+                        </toggleGroup>
+                    </RadioMenuItem>
+                    <RadioMenuItem text="Info" fx:id="logLevelInfoMenuItem" onAction="#onSetLogLevelInfo" selected="true" toggleGroup="$logLevelToggleGroup"/>
+                    <RadioMenuItem text="Warn" fx:id="logLevelWarnMenuItem" onAction="#onSetLogLevelWarn" toggleGroup="$logLevelToggleGroup"/>
+                </Menu>
+                <SeparatorMenuItem/>
                 <MenuItem text="About" onAction="#onAbout"/>
             </Menu>
         </MenuBar>
@@ -93,7 +116,7 @@
                                  visible="false" managed="false"
                                  HBox.hgrow="ALWAYS" maxWidth="Infinity"
                                  style="-fx-accent: #4a90d9;"/>
-                    <Button fx:id="viewReportButton" text="View Report" onAction="#onViewReport" disable="true"/>
+                    <Button fx:id="viewReportButton" text="View Last Organizing Report" onAction="#onViewReport" disable="true"/>
                     <Button fx:id="stopProgressButton" text="Stop" onAction="#onStopProgress" disable="true"/>
                     <Button fx:id="hideProgressButton" text="Hide" onAction="#onHideProgress"/>
                 </HBox>

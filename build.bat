@@ -1,58 +1,37 @@
 @echo off
-REM Build script for Album Organizer (Windows)
+cd /d "%~dp0"
 
-echo ========================================
-echo Building Album Organizer
-echo ========================================
-
-REM Clean and compile
-echo.
-echo Step 1: Cleaning and compiling...
-call mvn clean compile
+echo Building...
+call mvn package -DskipTests -q
 if errorlevel 1 goto error
 
-REM Run tests
-echo.
-echo Step 2: Running tests...
-call mvn test
-if errorlevel 1 goto error
+set "APP_EXE=target\dist\Album Organizer\Album Organizer.exe"
 
-REM Package
-echo.
-echo Step 3: Packaging application...
-call mvn package -DskipTests
-if errorlevel 1 goto error
-
-REM Check if build was successful
-if exist "target\album-organizer-1.0.0.jar" (
-    echo.
-    echo ========================================
-    echo Build successful!
-    echo ========================================
-    echo.
-    echo Application JAR: target\album-organizer-1.0.0.jar
-    echo Dependencies: target\lib\
-    echo.
-    echo To run the application:
-    echo   mvn javafx:run
-    echo   OR
-    echo   run.bat
-    echo.
-    echo To create native installer (requires JDK 17+):
-    echo   mvn jpackage:jpackage
-    echo.
-) else (
-    goto error
+if not exist "%APP_EXE%" (
+    echo Building Windows app...
+    if exist "target\dist" rmdir /s /q "target\dist"
+    copy target\album-organizer-1.0.0.jar target\lib\ >NUL
+    jpackage ^
+        --type app-image ^
+        --name "Album Organizer" ^
+        --app-version "1.1.0" ^
+        --input target\lib ^
+        --main-jar album-organizer-1.0.0.jar ^
+        --main-class com.albumorganizer.AlbumOrganizerApp ^
+        --icon src\main\resources\app-icon.png ^
+        --dest target\dist ^
+        --java-options "-Dfile.encoding=UTF-8" ^
+        --java-options "--module-path %%APPDIR%%" ^
+        --java-options "--add-modules=javafx.controls,javafx.fxml,javafx.swing"
+    del target\lib\album-organizer-1.0.0.jar >NUL 2>&1
 )
 
+echo Starting Album Organizer...
+start "" "%APP_EXE%" %*
 goto end
 
 :error
-echo.
-echo ========================================
 echo Build failed!
-echo ========================================
 exit /b 1
 
 :end
-pause

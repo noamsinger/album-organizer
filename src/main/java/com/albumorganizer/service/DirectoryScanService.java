@@ -16,6 +16,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiConsumer;
 
 /**
  * Service for scanning a single directory (non-recursive) on-demand.
@@ -48,7 +49,11 @@ public class DirectoryScanService {
      * @return list of media files found in this directory
      */
     public List<MediaFile> scanDirectory(Path directory, Map<Path, String> existingHashes) {
-        return doScanDirectory(directory, existingHashes);
+        return doScanDirectory(directory, existingHashes, null);
+    }
+
+    public List<MediaFile> scanDirectory(Path directory, Map<Path, String> existingHashes, BiConsumer<Integer, Integer> progressCallback) {
+        return doScanDirectory(directory, existingHashes, progressCallback);
     }
 
     /**
@@ -59,10 +64,10 @@ public class DirectoryScanService {
      * @return list of media files found in this directory
      */
     public List<MediaFile> scanDirectory(Path directory) {
-        return doScanDirectory(directory, null);
+        return doScanDirectory(directory, null, null);
     }
 
-    private List<MediaFile> doScanDirectory(Path directory, Map<Path, String> existingHashes) {
+    private List<MediaFile> doScanDirectory(Path directory, Map<Path, String> existingHashes, BiConsumer<Integer, Integer> progressCallback) {
         if (directory == null || !Files.exists(directory) || !Files.isDirectory(directory)) {
             logger.warn("Invalid directory: {}", directory);
             return new ArrayList<>();
@@ -83,8 +88,14 @@ public class DirectoryScanService {
             }
 
             // Process each file
-            for (Path file : filesInDir) {
+            for (int i = 0; i < filesInDir.size(); i++) {
+                Path file = filesInDir.get(i);
                 String filename = file.getFileName().toString();
+
+                // Report progress
+                if (progressCallback != null) {
+                    progressCallback.accept(i + 1, filesInDir.size());
+                }
 
                 // Check if it's a media file
                 MediaType type = FileTypeDetector.getMediaType(file);
@@ -138,6 +149,12 @@ public class DirectoryScanService {
                             if (type == MediaType.VIDEO) {
                                 Long duration = metadataService.getVideoDuration(file);
                                 mediaFile.setDurationSeconds(duration);
+                                int rotation = metadataService.getVideoRotation(file);
+                                if (rotation != 0) {
+                                    mediaFile.setOrientation(rotation);
+                                }
+                            } else {
+                                mediaFile.setOrientation(metadataService.getOrientation(file));
                             }
                         } else {
                             logger.warn("File is corrupted or invalid: {}", filename);

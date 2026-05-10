@@ -76,7 +76,7 @@ public class SnapshotRepository {
                 gzos.finish(); // Ensure GZIP stream is completed
             }
 
-            logger.info("Saved snapshot with {} hash entries to {}", fileIndex.size(), CACHE_FILE);
+            logger.debug("Saved snapshot with {} hash entries to {}", fileIndex.size(), CACHE_FILE);
         } catch (IOException e) {
             logger.error("Failed to save snapshot", e);
         }
@@ -106,7 +106,7 @@ public class SnapshotRepository {
                 return new HashMap<>();
             }
 
-            logger.info("Loaded snapshot from {} with {} hash entries (timestamp: {})",
+            logger.debug("Loaded snapshot from {} with {} hash entries (timestamp: {})",
                 CACHE_FILE, snapshot.fileIndex.size(), snapshot.timestamp);
 
             return snapshot.fileIndex;

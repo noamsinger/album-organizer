@@ -5,16 +5,39 @@ All notable changes to Album Organizer will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.1] - 2026-04-27
+## [1.2.0] - 2026-05-10
 
 ### Added
-- Pale orange theme (#FFE5CC) for window frames and UI elements
-- Custom styling for menu bar, status bar, and progress panel
+- Thumbnail view with loading spinners and async loading (thread pool = CPU cores)
+- Two-pass progress bar for folder navigation: scan phase (0-100%) then thumbnail phase (0-100%)
+- Video frame rotation using FFmpeg displaymatrix (reliable rotation detection)
+- HEIC thumbnail generation via macOS sips
+- LRU thumbnail disk cache at `~/.album-organizer/thumbnails/` (42MB max)
+- macOS Dock icon using Taskbar API
+- Shutdown timeout (5s) to prevent quit from stalling
+- "View Last Organizing Report" button — stays enabled across scans, writes to `/tmp/album-organizer-reports/` on demand
+- Organization reports stored compressed in memory (GZIP), written as `.txt` only when requested
+- "Do Magic" submenu in folder tree context menu containing "Organize Folder Recursively"
+- macOS `.dmg` installer created by `build.sh`
+- App icon with transparent corners for macOS (full ICNS with all sizes up to 1024px)
 
 ### Changed
-- Window chrome now uses pale orange color scheme
-- Updated CSS with pale orange backgrounds for frame elements
-- Menu bar moved inside window (no longer system menu bar) for consistent styling
+- `build.sh` now builds + packages only (no auto-launch). Run with `open "target/dist/Album Organizer.app"`
+- Removed `run.sh` and `run.bat` — use `build.sh` + direct app launch instead
+- macOS handles single-instance natively (no custom dialog needed)
+- Startup no longer auto-selects a folder (tree expands but doesn't trigger scan)
+- Video rotation now uses FFmpeg displaymatrix instead of unreliable QuickTime metadata tags
+- Video thumbnail rotation applied during frame extraction (cached correctly oriented)
+- UI no longer applies rotation for video thumbnails (handled by ThumbnailService)
+- Report button renamed to "View Last Organizing Report", never disabled by scans
+- OrganizeReportWriter writes to in-memory StringWriter instead of disk
+
+### Fixed
+- ProgressBar crash at startup ("A bound value cannot be set") — unbind before setProgress
+- Video thumbnails showing upside-down or sideways (displaymatrix vs tkhd rotation mismatch)
+- EXIF orientation 5 and 7 now handled for photos
+- App stalling on quit (snapshot save now has 5-second timeout)
+- Startup quick scan interrupted by automatic folder selection
 
 ## [1.1.0] - 2026-04-26
 

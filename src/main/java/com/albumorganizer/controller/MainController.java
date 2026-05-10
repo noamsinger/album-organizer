@@ -1,5 +1,7 @@
 package com.albumorganizer.controller;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.LoggerContext;
 import com.albumorganizer.model.DirectoryNode;
 import com.albumorganizer.model.MediaFile;
 import com.albumorganizer.model.FileIndexEntry;
@@ -12,6 +14,7 @@ import com.albumorganizer.service.ScannerService;
 import com.albumorganizer.service.DirectoryScanService;
 import com.albumorganizer.service.FileOrganizeService;
 import com.albumorganizer.service.OrganizeReportWriter;
+import com.albumorganizer.service.ThumbnailService;
 import com.albumorganizer.task.ScanTask;
 import com.albumorganizer.util.ErrorDialog;
 import com.albumorganizer.util.FileTrashUtil;
@@ -35,10 +38,16 @@ import org.slf4j.LoggerFactory;
 import java.awt.Desktop;
 import java.io.File;
 import java.io.IOException;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.GZIPOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -46,6 +55,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /**
@@ -83,6 +93,15 @@ public class MainController {
     @FXML private ProgressBar progressBar;
     @FXML private ListView<String> progressLogList;
     @FXML private CheckMenuItem showProgressPanelMenuItem;
+    @FXML private RadioMenuItem logLevelDebugMenuItem;
+    @FXML private RadioMenuItem logLevelInfoMenuItem;
+    @FXML private RadioMenuItem logLevelWarnMenuItem;
+    @FXML private RadioMenuItem sortByNameMenuItem;
+    @FXML private RadioMenuItem sortByDateTakenMenuItem;
+    @FXML private RadioMenuItem sortByDateMenuItem;
+    @FXML private RadioMenuItem sortByTypeMenuItem;
+    @FXML private RadioMenuItem sortByDurationMenuItem;
+    @FXML private RadioMenuItem sortByResolutionMenuItem;
     @FXML private Button viewReportButton;
     @FXML private Button stopProgressButton;
     @FXML private Button hideProgressButton;
@@ -91,13 +110,15 @@ public class MainController {
     private final DirectoryScanService directoryScanService;
     private final ConfigRepository configRepository;
     private final SnapshotRepository snapshotRepository;
+    private final ThumbnailService thumbnailService;
     private final Map<String, List<FileIndexEntry>> fileIndex; // Hash -> List of (directory, filename) pairs
     private List<Path> baseFolders;
     private List<Path> currentlyScannedFolders; // Track which folders are being scanned
     private ScanTask currentScanTask;
     private Task<?> currentOrganizeTask; // Track organize task for stop button
     private String preservedStatusMessage = null; // Preserve status message across automatic rescans
-    private Path lastOrganizeReportFile = null; // Track last organization report file
+    private byte[] lastOrganizeReportCompressed = null;
+    private String lastOrganizeReportTimestamp = null;
     private boolean thumbnailViewActive = false;
     private ObservableList<MediaFile> currentDisplayedFiles;
     private ExecutorService thumbnailLoadExecutor;
@@ -110,16 +131,18 @@ public class MainController {
         this.directoryScanService = new DirectoryScanService();
         this.configRepository = new ConfigRepository();
         this.snapshotRepository = new SnapshotRepository();
+        this.thumbnailService = new ThumbnailService();
         this.fileIndex = new HashMap<>();
         this.baseFolders = new ArrayList<>();
         this.currentlyScannedFolders = new ArrayList<>();
         this.currentDisplayedFiles = FXCollections.observableArrayList();
-        this.thumbnailLoadExecutor = Executors.newFixedThreadPool(4);
+        this.thumbnailLoadExecutor = Executors.newFixedThreadPool(
+                Math.max(4, Runtime.getRuntime().availableProcessors()));
     }
 
     @FXML
     public void initialize() {
-        logger.info("Initializing MainController");
+        logger.debug("Initializing MainController");
 
         // Setup table columns
         setupTableColumns();
@@ -157,11 +180,21 @@ public class MainController {
 
         // Run quick scan on startup for all album folders
         if (!baseFolders.isEmpty()) {
-            logger.info("Running startup quick scan on {} album folders", baseFolders.size());
+            logger.debug("Running startup quick scan on {} album folders", baseFolders.size());
             Platform.runLater(() -> startStartupQuickScan());
         }
 
-        logger.info("MainController initialized");
+        // Restore view mode from settings
+        if (settings.isThumbnailView()) {
+            thumbnailViewActive = true;
+            mediaTable.setVisible(false);
+            thumbnailScrollPane.setVisible(true);
+            thumbnailViewMenuItem.setSelected(true);
+        }
+
+        syncLogLevelMenu();
+
+        logger.debug("MainController initialized");
     }
 
     private void setupTableColumns() {
@@ -243,6 +276,11 @@ public class MainController {
             }
             return new javafx.beans.property.SimpleStringProperty("-");
         });
+        resolutionColumn.setComparator((a, b) -> {
+            long pixelsA = parsePixelCount(a);
+            long pixelsB = parsePixelCount(b);
+            return Long.compare(pixelsA, pixelsB);
+        });
 
         // Location column - HIDDEN
         locationColumn.setCellValueFactory(data ->
@@ -284,7 +322,7 @@ public class MainController {
                         // Corrupted files - add CSS class only
                         if (item.isCorrupted()) {
                             getStyleClass().add("corrupted");
-                            logger.info("Styling CORRUPTED: {}", item.getFilename());
+                            logger.debug("Styling CORRUPTED: {}", item.getFilename());
                         }
                         // Duplicate files - add CSS class only
                         else if (isDuplicate) {
@@ -462,13 +500,16 @@ public class MainController {
             organizeFolderRecursivelyItem.setDisable(!canOrganizeRecursively);
         });
 
+        Menu doMagicMenu = new Menu("Do Magic");
+        doMagicMenu.getItems().add(organizeFolderRecursivelyItem);
+
         contextMenu.getItems().addAll(
             fullScanWithHashItem,
             quickScanItem,
             new SeparatorMenuItem(),
             openInBrowserItem,
             new SeparatorMenuItem(),
-            organizeFolderRecursivelyItem,
+            doMagicMenu,
             new SeparatorMenuItem(),
             makeTargetItem,
             clearTargetItem,
@@ -558,7 +599,22 @@ public class MainController {
         }
 
         currentSelectedDirectory = directory;
+        settings.setLastSelectedFolder(directory.toString());
+        configRepository.setOrganizeSettings(settings);
         logger.debug("Directory selected: {}", directory);
+
+        // Show loading indicator
+        int estimatedCount = directoryScanService.getMediaFileCount(directory);
+        statusLabel.setText(String.format("Loading %d files...", estimatedCount));
+
+        // Show progress bar if no background scan is running
+        boolean showProgressBar = (currentScanTask == null || !currentScanTask.isRunning());
+        if (showProgressBar) {
+            progressBar.progressProperty().unbind();
+            progressBar.setProgress(0);
+            progressBar.setVisible(true);
+            progressBar.setManaged(true);
+        }
 
         // Build hash lookup from fileIndex to avoid recalculating hashes on display
         Map<Path, String> knownHashes = new HashMap<>();
@@ -573,10 +629,20 @@ public class MainController {
         });
 
         // Scan the directory (non-recursive) in background
+        final int totalFiles = estimatedCount;
+        final boolean usingProgressBar = showProgressBar;
         Task<List<MediaFile>> scanTask = new Task<>() {
             @Override
             protected List<MediaFile> call() {
-                return directoryScanService.scanDirectory(directory, knownHashes);
+                return directoryScanService.scanDirectory(directory, knownHashes, (processed, total) -> {
+                    int actualTotal = total > 0 ? total : totalFiles;
+                    Platform.runLater(() -> {
+                        if (usingProgressBar) {
+                            progressBar.setProgress(processed / (double) actualTotal);
+                        }
+                        statusLabel.setText(String.format("Reading files... %d/%d", processed, actualTotal));
+                    });
+                });
             }
         };
 
@@ -588,19 +654,42 @@ public class MainController {
             // Log corrupted files
             long corruptedCount = files.stream().filter(MediaFile::isCorrupted).count();
             if (corruptedCount > 0) {
-                logger.info("Loaded {} corrupted files from directory", corruptedCount);
+                logger.debug("Loaded {} corrupted files from directory", corruptedCount);
                 files.stream().filter(MediaFile::isCorrupted).limit(3).forEach(f ->
-                    logger.info("Corrupted file in view: {} - isCorrupted={}", f.getFilename(), f.isCorrupted())
+                    logger.debug("Corrupted file in view: {} - isCorrupted={}", f.getFilename(), f.isCorrupted())
                 );
             }
 
             updateFileCount(files.size());
             highlightDuplicates();
+            // Re-apply current table sort order
+            if (!mediaTable.getSortOrder().isEmpty()) {
+                mediaTable.sort();
+            }
+
+            if (usingProgressBar) {
+                progressBar.setProgress(0);
+                statusLabel.setText(String.format("Loading thumbnails... 0/%d", files.size()));
+            }
+
             refreshCurrentView();
+
+            // If not in thumbnail mode or no files, hide progress bar now
+            if (!thumbnailViewActive || files.isEmpty()) {
+                if (usingProgressBar) {
+                    progressBar.setVisible(false);
+                    progressBar.setManaged(false);
+                }
+                statusLabel.setText(String.format("Loaded %d files", files.size()));
+            }
             logger.debug("Loaded {} files from: {}", files.size(), directory);
         });
 
         scanTask.setOnFailed(event -> {
+            if (usingProgressBar) {
+                progressBar.setVisible(false);
+                progressBar.setManaged(false);
+            }
             logger.error("Failed to scan directory: {}", directory, scanTask.getException());
             statusLabel.setText("Error scanning directory");
         });
@@ -622,7 +711,7 @@ public class MainController {
                 File file = mediaFile.getAbsolutePath().toFile();
                 if (file.exists()) {
                     desktop.open(file);
-                    logger.info("Opened file: {}", file);
+                    logger.debug("Opened file: {}", file);
                 } else {
                     showError("File Not Found", "File does not exist: " + file);
                 }
@@ -646,7 +735,7 @@ public class MainController {
                 File folder = mediaFile.getAbsolutePath().getParent().toFile();
                 if (folder.exists()) {
                     desktop.open(folder);
-                    logger.info("Opened folder: {}", folder);
+                    logger.debug("Opened folder: {}", folder);
                 } else {
                     showError("Folder Not Found", "Folder does not exist: " + folder);
                 }
@@ -724,7 +813,7 @@ public class MainController {
         try {
             if (Desktop.isDesktopSupported()) {
                 Desktop.getDesktop().open(path.toFile());
-                logger.info("Opened in file browser: {}", path);
+                logger.debug("Opened in file browser: {}", path);
             }
         } catch (IOException e) {
             logger.error("Failed to open in file browser: {}", path, e);
@@ -890,12 +979,6 @@ public class MainController {
         statusLabel.setText(String.format("Starting %s scan of %d folder(s)...",
             isFullScanWithHash ? "full scan with hash" : "quick", foldersToScan.size()));
 
-        // Disable View Report button ONLY if this is not an automatic rescan after organize
-        // (preservedStatusMessage is set when an organize completes and triggers automatic rescan)
-        if (preservedStatusMessage == null) {
-            viewReportButton.setDisable(true);
-        }
-
         // Track which folders are being scanned
         currentlyScannedFolders = new ArrayList<>(foldersToScan);
 
@@ -941,6 +1024,7 @@ public class MainController {
         // not a post-organize automatic rescan (preservedStatusMessage is set in that case)
         if (preservedStatusMessage == null) {
             progressLogList.getItems().clear();
+            progressBar.progressProperty().unbind();
             progressBar.setProgress(0);
             progressBar.setVisible(false);
             progressBar.setManaged(false);
@@ -993,20 +1077,52 @@ public class MainController {
         progressPanel.setVisible(false);
         progressPanel.setManaged(false);
         showProgressPanelMenuItem.setSelected(false);
-        logger.info("Scan panel hidden");
+        logger.debug("Scan panel hidden");
     }
 
     @FXML
     private void onViewReport() {
-        if (lastOrganizeReportFile != null && Files.exists(lastOrganizeReportFile)) {
-            try {
-                // Open the report file with the system's default text editor
-                java.awt.Desktop.getDesktop().open(lastOrganizeReportFile.toFile());
-                logger.info("Opened report file: {}", lastOrganizeReportFile);
-            } catch (Exception e) {
-                logger.error("Failed to open report file", e);
-                showError("Error", "Failed to open report file:\n" + e.getMessage());
-            }
+        if (lastOrganizeReportCompressed == null) {
+            return;
+        }
+        try {
+            String content = decompressReport(lastOrganizeReportCompressed);
+            Path reportsDir = Path.of("/tmp", "album-organizer-reports");
+            Files.createDirectories(reportsDir);
+            String filename = "album-organizer." + lastOrganizeReportTimestamp + ".txt";
+            Path reportFile = reportsDir.resolve(filename);
+            Files.writeString(reportFile, content);
+            java.awt.Desktop.getDesktop().open(reportFile.toFile());
+            logger.info("Opened report file: {}", reportFile);
+        } catch (Exception e) {
+            logger.error("Failed to open report file", e);
+            showError("Error", "Failed to open report file:\n" + e.getMessage());
+        }
+    }
+
+    private void storeReport(OrganizeReportWriter reportWriter) {
+        try {
+            String content = reportWriter.getContent();
+            lastOrganizeReportCompressed = compressReport(content);
+            lastOrganizeReportTimestamp = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss")
+                    .format(reportWriter.getStartTime().atZone(java.time.ZoneId.systemDefault()));
+            viewReportButton.setDisable(false);
+        } catch (IOException e) {
+            logger.error("Failed to compress report", e);
+        }
+    }
+
+    private byte[] compressReport(String content) throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        try (GZIPOutputStream gzip = new GZIPOutputStream(baos)) {
+            gzip.write(content.getBytes(StandardCharsets.UTF_8));
+        }
+        return baos.toByteArray();
+    }
+
+    private String decompressReport(byte[] compressed) throws IOException {
+        try (GZIPInputStream gzip = new GZIPInputStream(new ByteArrayInputStream(compressed))) {
+            return new String(gzip.readAllBytes(), StandardCharsets.UTF_8);
         }
     }
 
@@ -1170,7 +1286,7 @@ public class MainController {
             .filter(entry -> entry.getValue().size() > 1)
             .count();
 
-        logger.info("Found {} unique duplicate hashes in global index", duplicateHashCount);
+        logger.debug("Found {} unique duplicate hashes in global index", duplicateHashCount);
 
         // Count duplicates in current view
         int duplicateCount = (int) currentDisplayedFiles.stream()
@@ -1181,7 +1297,7 @@ public class MainController {
             })
             .count();
 
-        logger.info("Should be highlighting {} duplicate files (out of {} total)", duplicateCount, currentDisplayedFiles.size());
+        logger.debug("Should be highlighting {} duplicate files (out of {} total)", duplicateCount, currentDisplayedFiles.size());
 
         // Force table to refresh all rows by triggering a layout update
         mediaTable.refresh();
@@ -1193,6 +1309,10 @@ public class MainController {
         TreeItem<DirectoryNode> currentSelection = directoryTree.getSelectionModel().getSelectedItem();
         if (currentSelection != null && currentSelection.getValue() != null) {
             currentlySelectedPath = currentSelection.getValue().getPath();
+        }
+        // Fall back to saved last selected folder
+        if (currentlySelectedPath == null && settings.getLastSelectedFolder() != null) {
+            currentlySelectedPath = java.nio.file.Paths.get(settings.getLastSelectedFolder());
         }
 
         TreeItem<DirectoryNode> root = new TreeItem<>(new DirectoryNode(null, "All Album Folders"));
@@ -1206,7 +1326,7 @@ public class MainController {
             DirectoryNode albumNode = new DirectoryNode(baseFolder, baseFolder.getFileName() != null ?
                 baseFolder.getFileName().toString() : baseFolder.toString(), true);
             TreeItem<DirectoryNode> albumItem = new TreeItem<>(albumNode);
-            albumItem.setExpanded(true);
+            albumItem.setExpanded(false);
 
             // Build hierarchical subtree for this album
             buildSubtree(albumItem, baseFolder);
@@ -1238,11 +1358,24 @@ public class MainController {
             itemToSelect = findTreeItemByPath(root, currentlySelectedPath);
         }
 
-        // Select the previously selected item, or first album as fallback
+        // Expand the tree to show the previously selected item, but don't select it
+        // (selecting would trigger onDirectorySelected and interrupt the startup scan)
         if (itemToSelect != null) {
-            directoryTree.getSelectionModel().select(itemToSelect);
+            expandPathToItem(itemToSelect);
+            int row = directoryTree.getRow(itemToSelect);
+            if (row >= 0) {
+                directoryTree.scrollTo(row);
+            }
         } else if (firstAlbum != null) {
-            directoryTree.getSelectionModel().select(firstAlbum);
+            expandPathToItem(firstAlbum);
+        }
+    }
+
+    private void expandPathToItem(TreeItem<DirectoryNode> item) {
+        TreeItem<DirectoryNode> parent = item.getParent();
+        while (parent != null) {
+            parent.setExpanded(true);
+            parent = parent.getParent();
         }
     }
 
@@ -1413,10 +1546,10 @@ public class MainController {
         baseFolders = configRepository.getBaseFolders();
         if (!baseFolders.isEmpty()) {
             statusLabel.setText("Loaded " + baseFolders.size() + " saved folder(s)");
-            logger.info("Loaded {} base folders", baseFolders.size());
+            logger.debug("Loaded {} base folders", baseFolders.size());
         }
         if (settings.getTargetFolder() != null) {
-            logger.info("Loaded target folder: {}", settings.getTargetFolder());
+            logger.debug("Loaded target folder: {}", settings.getTargetFolder());
         }
     }
 
@@ -1424,7 +1557,7 @@ public class MainController {
         Map<String, List<FileIndexEntry>> snapshot = snapshotRepository.loadSnapshot();
         if (!snapshot.isEmpty()) {
             fileIndex.putAll(snapshot);
-            logger.info("Loaded snapshot with {} hash entries", snapshot.size());
+            logger.debug("Loaded snapshot with {} hash entries", snapshot.size());
 
             // Count total files from snapshot
             int totalFiles = snapshot.values().stream()
@@ -1436,7 +1569,7 @@ public class MainController {
 
     private void saveSnapshot() {
         snapshotRepository.saveSnapshot(fileIndex);
-        logger.info("Saved snapshot with {} hash entries", fileIndex.size());
+        logger.debug("Saved snapshot with {} hash entries", fileIndex.size());
     }
 
     /**
@@ -1444,9 +1577,10 @@ public class MainController {
      * Called by AlbumOrganizerApp when window is closed.
      */
     public void saveSnapshotOnShutdown() {
-        logger.info("saveSnapshotOnShutdown called");
+        logger.debug("saveSnapshotOnShutdown called");
         saveSnapshot();
-        logger.info("saveSnapshotOnShutdown completed");
+        thumbnailService.clearCache();
+        logger.debug("saveSnapshotOnShutdown completed");
     }
 
     /**
@@ -1457,7 +1591,7 @@ public class MainController {
             return;
         }
 
-        logger.info("Starting startup quick scan of {} album folders", baseFolders.size());
+        logger.debug("Starting startup quick scan of {} album folders", baseFolders.size());
         statusLabel.setText("Running startup quick scan...");
 
         // Track which folders are being scanned
@@ -1482,7 +1616,7 @@ public class MainController {
         // Handle task completion
         currentScanTask.setOnSucceeded(event -> {
             ScanResult result = (ScanResult) event.getSource().getValue();
-            logger.info("Startup quick scan completed: {}", result);
+            logger.debug("Startup quick scan completed: {}", result);
 
             Platform.runLater(() -> {
                 // Unbind first
@@ -1551,7 +1685,7 @@ public class MainController {
                 updateErrorCount(result.getErrors().size());
 
                 statusLabel.setText(String.format("Startup scan complete: %d files indexed", result.getTotalScanned()));
-                logger.info("Startup quick scan finished successfully");
+                logger.debug("Startup quick scan finished successfully");
             });
         });
 
@@ -1588,14 +1722,17 @@ public class MainController {
         logger.info("Application exit requested from menu");
 
         // Save snapshot before shutting down
-        logger.info("Saving snapshot before exit");
+        logger.debug("Saving snapshot before exit");
         saveSnapshot();
-        logger.info("Snapshot save completed");
+        logger.debug("Snapshot save completed");
 
         // Shutdown executor
         if (thumbnailLoadExecutor != null) {
             thumbnailLoadExecutor.shutdown();
         }
+
+        // Clear thumbnail cache on exit
+        thumbnailService.clearCache();
 
         // Close the window
         Stage stage = (Stage) rootPane.getScene().getWindow();
@@ -1618,13 +1755,53 @@ public class MainController {
     }
 
     @FXML
+    private void onSetLogLevelDebug() {
+        setAppLogLevel(Level.DEBUG);
+        statusLabel.setText("Log level set to DEBUG");
+    }
+
+    @FXML
+    private void onSetLogLevelInfo() {
+        setAppLogLevel(Level.INFO);
+        statusLabel.setText("Log level set to INFO");
+    }
+
+    @FXML
+    private void onSetLogLevelWarn() {
+        setAppLogLevel(Level.WARN);
+        statusLabel.setText("Log level set to WARN");
+    }
+
+    private void setAppLogLevel(Level level) {
+        LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
+        loggerContext.getLogger("com.albumorganizer").setLevel(level);
+        logger.info("Log level changed to: {}", level);
+    }
+
+    private void syncLogLevelMenu() {
+        LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
+        Level currentLevel = loggerContext.getLogger("com.albumorganizer").getLevel();
+        if (currentLevel != null) {
+            if (currentLevel.isGreaterOrEqual(Level.WARN)) {
+                logLevelWarnMenuItem.setSelected(true);
+            } else if (currentLevel.isGreaterOrEqual(Level.INFO)) {
+                logLevelInfoMenuItem.setSelected(true);
+            } else {
+                logLevelDebugMenuItem.setSelected(true);
+            }
+        }
+    }
+
+    @FXML
     private void onListView() {
         thumbnailViewActive = false;
         mediaTable.setVisible(true);
         thumbnailScrollPane.setVisible(false);
         mediaTable.setItems(currentDisplayedFiles);
+        settings.setThumbnailView(false);
+        configRepository.setOrganizeSettings(settings);
         statusLabel.setText("Switched to List View");
-        logger.info("Switched to List View");
+        logger.debug("Switched to List View");
     }
 
     @FXML
@@ -1633,8 +1810,10 @@ public class MainController {
         mediaTable.setVisible(false);
         thumbnailScrollPane.setVisible(true);
         loadThumbnails();
+        settings.setThumbnailView(true);
+        configRepository.setOrganizeSettings(settings);
         statusLabel.setText("Switched to Thumbnail View");
-        logger.info("Switched to Thumbnail View");
+        logger.debug("Switched to Thumbnail View");
     }
 
     @FXML
@@ -1642,7 +1821,7 @@ public class MainController {
         boolean show = showProgressPanelMenuItem.isSelected();
         progressPanel.setVisible(show);
         progressPanel.setManaged(show);
-        logger.info("Scan panel {}", show ? "shown" : "hidden");
+        logger.debug("Scan panel {}", show ? "shown" : "hidden");
     }
 
     @FXML
@@ -1651,7 +1830,7 @@ public class MainController {
         applyFontSize();
         configRepository.setOrganizeSettings(settings);
         statusLabel.setText("Increased font size");
-        logger.info("Increased font size factor to: {}", settings.getFontSizeFactor());
+        logger.debug("Increased font size factor to: {}", settings.getFontSizeFactor());
     }
 
     @FXML
@@ -1660,7 +1839,7 @@ public class MainController {
         applyFontSize();
         configRepository.setOrganizeSettings(settings);
         statusLabel.setText("Decreased font size");
-        logger.info("Decreased font size factor to: {}", settings.getFontSizeFactor());
+        logger.debug("Decreased font size factor to: {}", settings.getFontSizeFactor());
     }
 
     @FXML
@@ -1669,7 +1848,7 @@ public class MainController {
         applyFontSize();
         configRepository.setOrganizeSettings(settings);
         statusLabel.setText("Reset font size to 100%");
-        logger.info("Reset font size factor to 0");
+        logger.debug("Reset font size factor to 0");
     }
 
     private void applyFontSize() {
@@ -1684,11 +1863,51 @@ public class MainController {
         logger.debug("Applied font scale: {}% (factor: {}, scale: {})", percentage, settings.getFontSizeFactor(), scale);
     }
 
+    @FXML
+    private void onSortByName() {
+        applySortOrder(filenameColumn, TableColumn.SortType.ASCENDING);
+    }
+
+    @FXML
+    private void onSortByDateTaken() {
+        applySortOrder(dateTakenColumn, TableColumn.SortType.ASCENDING);
+    }
+
+    @FXML
+    private void onSortByDate() {
+        applySortOrder(dateColumn, TableColumn.SortType.ASCENDING);
+    }
+
+    @FXML
+    private void onSortByType() {
+        applySortOrder(typeColumn, TableColumn.SortType.ASCENDING);
+    }
+
+    @FXML
+    private void onSortByDuration() {
+        applySortOrder(durationColumn, TableColumn.SortType.ASCENDING);
+    }
+
+    @FXML
+    private void onSortByResolution() {
+        applySortOrder(resolutionColumn, TableColumn.SortType.DESCENDING);
+    }
+
+    private void applySortOrder(TableColumn<MediaFile, ?> column, TableColumn.SortType sortType) {
+        mediaTable.getSortOrder().clear();
+        column.setSortType(sortType);
+        mediaTable.getSortOrder().add(column);
+        mediaTable.sort();
+        if (thumbnailViewActive) {
+            loadThumbnails();
+        }
+    }
+
     private void refreshCurrentView() {
         if (thumbnailViewActive) {
             loadThumbnails();
         } else {
-            mediaTable.setItems(currentDisplayedFiles);
+            mediaTable.refresh();
         }
     }
 
@@ -1702,13 +1921,16 @@ public class MainController {
             return;
         }
 
+        int totalFiles = currentDisplayedFiles.size();
+        AtomicInteger thumbnailsCompleted = new AtomicInteger(0);
+
         for (MediaFile mediaFile : currentDisplayedFiles) {
-            VBox thumbnailBox = createThumbnailCard(mediaFile);
+            VBox thumbnailBox = createThumbnailCard(mediaFile, totalFiles, thumbnailsCompleted);
             thumbnailPane.getChildren().add(thumbnailBox);
         }
     }
 
-    private VBox createThumbnailCard(MediaFile mediaFile) {
+    private VBox createThumbnailCard(MediaFile mediaFile, int totalFiles, AtomicInteger thumbnailsCompleted) {
         VBox card = new VBox(5);
         card.setAlignment(Pos.CENTER);
         card.setStyle("-fx-padding: 10; -fx-background-color: white; -fx-border-color: #ddd; -fx-border-radius: 5; -fx-background-radius: 5;");
@@ -1720,6 +1942,17 @@ public class MainController {
         imageView.setFitHeight(160);
         imageView.setPreserveRatio(true);
         imageView.setSmooth(true);
+
+        // Loading spinner shown until thumbnail is ready
+        ProgressIndicator loadingSpinner = new ProgressIndicator();
+        loadingSpinner.setPrefSize(40, 40);
+        loadingSpinner.setMaxSize(40, 40);
+
+        // Wrap ImageView in a fixed-size container to prevent rotation overflow
+        StackPane imageContainer = new StackPane(loadingSpinner, imageView);
+        imageContainer.setPrefSize(160, 160);
+        imageContainer.setMinSize(160, 160);
+        imageContainer.setMaxSize(160, 160);
 
         // Filename label
         Label filenameLabel = new Label(mediaFile.getFilename());
@@ -1733,10 +1966,10 @@ public class MainController {
             filenameLabel.setStyle("-fx-font-size: 11px; -fx-text-alignment: center;");
         }
 
-        card.getChildren().addAll(imageView, filenameLabel);
+        card.getChildren().addAll(imageContainer, filenameLabel);
 
         // Load thumbnail asynchronously
-        loadThumbnailAsync(mediaFile, imageView);
+        loadThumbnailAsync(mediaFile, imageView, loadingSpinner, totalFiles, thumbnailsCompleted);
 
         // Context menu
         ContextMenu contextMenu = new ContextMenu();
@@ -1790,11 +2023,19 @@ public class MainController {
         return card;
     }
 
-    private void loadThumbnailAsync(MediaFile mediaFile, ImageView imageView) {
+    private void loadThumbnailAsync(MediaFile mediaFile, ImageView imageView, ProgressIndicator loadingSpinner,
+                                     int totalFiles, AtomicInteger thumbnailsCompleted) {
         Task<Image> loadTask = new Task<>() {
             @Override
             protected Image call() throws Exception {
                 try {
+                    if (thumbnailService.needsSpecialHandling(mediaFile.getAbsolutePath(), mediaFile.getType())) {
+                        Image thumbnail = thumbnailService.generateThumbnail(
+                                mediaFile.getAbsolutePath(), mediaFile.getType());
+                        if (thumbnail != null) {
+                            return thumbnail;
+                        }
+                    }
                     String fileUri = mediaFile.getAbsolutePath().toUri().toString();
                     return new Image(fileUri, 160, 160, true, true, true);
                 } catch (Exception e) {
@@ -1807,18 +2048,69 @@ public class MainController {
         loadTask.setOnSucceeded(event -> {
             Image image = loadTask.getValue();
             if (image != null) {
-                Platform.runLater(() -> imageView.setImage(image));
+                Platform.runLater(() -> {
+                    imageView.setImage(image);
+                    applyOrientationRotation(imageView, mediaFile.getOrientation());
+                    loadingSpinner.setVisible(false);
+                    onThumbnailCompleted(totalFiles, thumbnailsCompleted);
+                });
             } else {
-                // Show placeholder for failed loads
                 Platform.runLater(() -> {
                     Label errorLabel = new Label("?");
                     errorLabel.setStyle("-fx-font-size: 48px; -fx-text-fill: #999;");
                     imageView.setImage(null);
+                    loadingSpinner.setVisible(false);
+                    onThumbnailCompleted(totalFiles, thumbnailsCompleted);
                 });
             }
         });
 
         thumbnailLoadExecutor.submit(loadTask);
+    }
+
+    private void onThumbnailCompleted(int totalFiles, AtomicInteger thumbnailsCompleted) {
+        int done = thumbnailsCompleted.incrementAndGet();
+        if (progressBar.isVisible() && progressBar.isManaged()) {
+            progressBar.setProgress(done / (double) totalFiles);
+            statusLabel.setText(String.format("Loading thumbnails... %d/%d", done, totalFiles));
+            if (done >= totalFiles) {
+                progressBar.setVisible(false);
+                progressBar.setManaged(false);
+                statusLabel.setText(String.format("Loaded %d files", totalFiles));
+            }
+        }
+    }
+
+    private void applyOrientationRotation(ImageView imageView, int orientation) {
+        switch (orientation) {
+            case 3: imageView.setRotate(180); break;   // EXIF upside down
+            case 5:                                     // EXIF transposed (mirror + 90 CW)
+            case 6:                                     // EXIF rotated 90 CW
+                imageView.setRotate(90);
+                imageView.setFitWidth(120);
+                imageView.setFitHeight(120);
+                break;
+            case 7:                                     // EXIF transverse (mirror + 270 CW)
+            case 8:                                     // EXIF rotated 270 CW
+                imageView.setRotate(270);
+                imageView.setFitWidth(120);
+                imageView.setFitHeight(120);
+                break;
+            // Video rotation (90, 180, 270) is handled by ThumbnailService during frame extraction
+        }
+    }
+
+    private long parsePixelCount(String resolution) {
+        if (resolution == null || resolution.equals("-")) return 0;
+        String[] parts = resolution.split("[x×]");
+        if (parts.length == 2) {
+            try {
+                return Long.parseLong(parts[0].trim()) * Long.parseLong(parts[1].trim());
+            } catch (NumberFormatException e) {
+                return 0;
+            }
+        }
+        return 0;
     }
 
     private void showWarning(String title, String message) {
@@ -2072,15 +2364,13 @@ public class MainController {
 
             if (result.isSuccess()) {
                 statusLabel.setText("File organized successfully to: " + result.getTargetPath().getFileName());
-                logger.info("Organized file {} to {}", mediaFile.getFilename(), result.getTargetPath());
+                logger.debug("Organized file {} to {}", mediaFile.getFilename(), result.getTargetPath());
 
                 if (reportWriter != null) {
                     reportWriter.logSuccess(mediaFile, sourcePath, result.getTargetPath());
                     reportWriter.writeSummary(1, 1, 0, 0);
                     reportWriter.close();
-                    lastOrganizeReportFile = reportWriter.getReportFile();
-                    viewReportButton.setDisable(false);
-                    logger.info("Single file organize report created: {}", lastOrganizeReportFile);
+                    storeReport(reportWriter);
                 }
 
                 // If moved, remove from current view
@@ -2093,10 +2383,10 @@ public class MainController {
                 // Rescan the target folder to update the file index and show new file
                 Path targetFolder = settings.getTargetFolder();
                 if (targetFolder != null && baseFolders.contains(targetFolder)) {
-                    logger.info("Rescanning target folder to update index: {}", targetFolder);
+                    logger.debug("Rescanning target folder to update index: {}", targetFolder);
                     fullScanWithHashFolder(targetFolder);
                 } else if (targetFolder != null) {
-                    logger.info("Target folder is not in base folders, adding it: {}", targetFolder);
+                    logger.debug("Target folder is not in base folders, adding it: {}", targetFolder);
                     // Target folder is not an album folder - add it temporarily for scanning
                     baseFolders.add(targetFolder);
                     fullScanWithHashFolder(targetFolder);
@@ -2111,8 +2401,7 @@ public class MainController {
                     reportWriter.logSkipped(mediaFile, sourcePath, result.getErrorMessage());
                     reportWriter.writeSummary(1, 0, 1, 0);
                     reportWriter.close();
-                    lastOrganizeReportFile = reportWriter.getReportFile();
-                    viewReportButton.setDisable(false);
+                    storeReport(reportWriter);
                 }
             } else {
                 statusLabel.setText("Failed to organize file");
@@ -2123,8 +2412,7 @@ public class MainController {
                     reportWriter.logFailure(mediaFile, sourcePath, result.getErrorMessage());
                     reportWriter.writeSummary(1, 0, 0, 1);
                     reportWriter.close();
-                    lastOrganizeReportFile = reportWriter.getReportFile();
-                    viewReportButton.setDisable(false);
+                    storeReport(reportWriter);
                 }
             }
         } catch (Exception e) {
@@ -2136,8 +2424,7 @@ public class MainController {
                     reportWriter.logFailure(mediaFile, mediaFile.getAbsolutePath(), e.getMessage());
                     reportWriter.writeSummary(1, 0, 0, 1);
                     reportWriter.close();
-                    lastOrganizeReportFile = reportWriter.getReportFile();
-                    viewReportButton.setDisable(false);
+                    storeReport(reportWriter);
                 } catch (IOException ex) {
                     logger.error("Failed to write error to report", ex);
                 }
@@ -2313,8 +2600,14 @@ public class MainController {
                 reportWriter.writeSummary(processed, succeeded, skipped, failed);
                 reportWriter.close();
 
-                // Store report path for viewing
-                lastOrganizeReportFile = reportWriter.getReportFile();
+                // Store report content compressed for on-demand viewing
+                try {
+                    lastOrganizeReportCompressed = compressReport(reportWriter.getContent());
+                    lastOrganizeReportTimestamp = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss")
+                            .format(reportWriter.getStartTime().atZone(java.time.ZoneId.systemDefault()));
+                } catch (IOException e) {
+                    logger.error("Failed to compress report", e);
+                }
 
                 return new OrganizeRecursiveResult(processed, succeeded, skipped, failed, errors);
             }
@@ -2348,7 +2641,6 @@ public class MainController {
 
                 // Enable View Report button
                 viewReportButton.setDisable(false);
-                logger.info("View Report button enabled, report file: {}", lastOrganizeReportFile);
 
                 // Preserve this summary for after the automatic rescan
                 preservedStatusMessage = summary;

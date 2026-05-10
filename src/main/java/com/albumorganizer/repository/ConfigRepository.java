@@ -356,6 +356,12 @@ public class ConfigRepository {
                 if (settingsSection.containsKey("fontSizeFactor")) {
                     settings.setFontSizeFactor(Integer.parseInt(settingsSection.get("fontSizeFactor")));
                 }
+                if (settingsSection.containsKey("lastSelectedFolder")) {
+                    settings.setLastSelectedFolder(settingsSection.get("lastSelectedFolder"));
+                }
+                if (settingsSection.containsKey("thumbnailView")) {
+                    settings.setThumbnailView(Boolean.parseBoolean(settingsSection.get("thumbnailView")));
+                }
             } catch (Exception e) {
                 logger.warn("Failed to parse target folder or font size factor, using defaults", e);
             }
@@ -392,6 +398,12 @@ public class ConfigRepository {
             settingsSection.remove("targetFolder");
         }
         settingsSection.put("fontSizeFactor", String.valueOf(settings.getFontSizeFactor()));
+        if (settings.getLastSelectedFolder() != null) {
+            settingsSection.put("lastSelectedFolder", settings.getLastSelectedFolder());
+        } else {
+            settingsSection.remove("lastSelectedFolder");
+        }
+        settingsSection.put("thumbnailView", String.valueOf(settings.isThumbnailView()));
 
         writeIniFile(config);
         logger.debug("Saved organize settings to config file");

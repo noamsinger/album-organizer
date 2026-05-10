@@ -23,5 +23,5 @@
     </root>
 
     <!-- Set package-specific log levels -->
-    <logger name="com.albumorganizer" level="DEBUG" />
+    <logger name="com.albumorganizer" level="INFO" />
 </configuration>

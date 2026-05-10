@@ -25,6 +25,7 @@ public class MediaFile {
     private Instant dateTaken;     // Original date/time photo was taken (from EXIF)
     private boolean dateEstimated; // True if dateTaken was estimated from filename
     private boolean corrupted;     // True if file has invalid/corrupted content
+    private int orientation;       // EXIF orientation (1-8), 1 = normal
 
     public MediaFile() {
         this.metadata = new HashMap<>();
@@ -150,6 +151,14 @@ public class MediaFile {
 
     public void setCorrupted(boolean corrupted) {
         this.corrupted = corrupted;
+    }
+
+    public int getOrientation() {
+        return orientation;
+    }
+
+    public void setOrientation(int orientation) {
+        this.orientation = orientation;
     }
 
     @Override
