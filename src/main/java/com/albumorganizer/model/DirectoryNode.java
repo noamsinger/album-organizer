@@ -16,6 +16,9 @@ public class DirectoryNode {
     private int mediaFileCount; // Direct files in this directory only
     private int recursiveFileCount; // Total files in this directory and all subdirectories
     private boolean album; // True if this is a base/album folder
+    private boolean recycleBin; // True if this is the recycle-bin folder
+    private String archiveType; // "ZIP", "RAR", or null for regular directories
+    private Path archivePath;   // Path to the archive file (non-null when archiveType != null)
 
     public DirectoryNode(Path path) {
         this.path = path;
@@ -104,6 +107,34 @@ public class DirectoryNode {
 
     public void setAlbum(boolean album) {
         this.album = album;
+    }
+
+    public boolean isRecycleBin() {
+        return recycleBin;
+    }
+
+    public void setRecycleBin(boolean recycleBin) {
+        this.recycleBin = recycleBin;
+    }
+
+    public boolean isArchiveNode() {
+        return archiveType != null;
+    }
+
+    public String getArchiveType() {
+        return archiveType;
+    }
+
+    public void setArchiveType(String archiveType) {
+        this.archiveType = archiveType;
+    }
+
+    public Path getArchivePath() {
+        return archivePath;
+    }
+
+    public void setArchivePath(Path archivePath) {
+        this.archivePath = archivePath;
     }
 
     @Override

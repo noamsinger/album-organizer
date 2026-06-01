@@ -4,7 +4,27 @@
       "Bash(mvn clean *)",
       "Bash(zcat ~/.album-organizer/cache.json.gz)",
       "Bash(gunzip -c ~/.album-organizer/cache.json.gz)",
-      "Bash(mvn compile *)"
+      "Bash(mvn compile *)",
+      "Bash(mvn javafx:run -Djavafx.mainClass=com.albumorganizer.AlbumOrganizerApp)",
+      "Bash(mvn javafx:run -X)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:docs.localai.io)",
+      "WebFetch(domain:ollama.com)",
+      "WebFetch(domain:docs.ollama.com)",
+      "WebFetch(domain:docs.invokeai.org)",
+      "Bash(pkill -f AlbumOrganizerApp)",
+      "Bash(mvn javafx:run)",
+      "Read(//private/tmp/**)",
+      "WebFetch(domain:ai.google.dev)",
+      "WebFetch(domain:docs.x.ai)",
+      "WebFetch(domain:developers.google.com)",
+      "Bash(grep -v \"^--$\")",
+      "WebFetch(domain:platform.openai.com)",
+      "WebFetch(domain:platform.stability.ai)",
+      "WebFetch(domain:developers.openai.com)",
+      "WebFetch(domain:openai.com)",
+      "Bash(curl *)"
     ]
   }
 }

@@ -158,7 +158,7 @@
 }
 
 .menu:hover, .menu:showing {
-    -fx-background-color: #e0e0e0;
+    -fx-background-color: #1565c0;
 }
 
 /* Progress Dialog */
@@ -215,10 +215,49 @@
 
 .context-menu .menu-item {
     -fx-padding: 6px 12px;
+    -fx-text-fill: black;
 }
 
-.context-menu .menu-item:hover {
-    -fx-background-color: #e3f2fd;
+.context-menu .menu-item:hover,
+.context-menu .menu-item:focused {
+    -fx-background-color: #1565c0;
+    -fx-text-fill: black;
+}
+
+.context-menu .menu-item:hover .label,
+.context-menu .menu-item:focused .label {
+    -fx-text-fill: black;
+}
+
+.context-menu .menu-item:disabled {
+    -fx-opacity: 0.5;
+}
+
+/* Top-level menu items hover */
+.menu-bar .menu:hover,
+.menu-bar .menu:showing {
+    -fx-background-color: #1565c0;
+}
+
+.menu-bar .menu:hover > .label,
+.menu-bar .menu:showing > .label {
+    -fx-text-fill: black;
+}
+
+/* Submenu items */
+.menu-item {
+    -fx-text-fill: black;
+}
+
+.menu-item:hover,
+.menu-item:focused {
+    -fx-background-color: #1565c0;
+    -fx-text-fill: black;
+}
+
+.menu-item:hover .label,
+.menu-item:focused .label {
+    -fx-text-fill: black;
 }
 
 /* Split Pane */

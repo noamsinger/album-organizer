@@ -14,6 +14,7 @@
             <Menu text="File">
                 <MenuItem text="Add Album Folder" onAction="#onSelectFolders" fx:id="menuSelectFolders"/>
                 <MenuItem text="Add Target Folder" onAction="#onAddTargetFolder"/>
+                <MenuItem text="Add Recycle-Bin Folder" onAction="#onAddRecycleBinFolder"/>
                 <SeparatorMenuItem/>
                 <MenuItem text="Settings..." onAction="#onSettings"/>
                 <SeparatorMenuItem/>
@@ -26,6 +27,8 @@
                     </toggleGroup>
                 </RadioMenuItem>
                 <RadioMenuItem text="Thumbnail View" fx:id="thumbnailViewMenuItem" onAction="#onThumbnailView" toggleGroup="$viewToggleGroup"/>
+                <SeparatorMenuItem/>
+                <CheckMenuItem text="Show Archives in Tree" fx:id="showArchivesMenuItem" onAction="#onToggleShowArchives" selected="true"/>
                 <SeparatorMenuItem/>
                 <Menu text="Sort By">
                     <RadioMenuItem text="Name" fx:id="sortByNameMenuItem" onAction="#onSortByName" selected="true">

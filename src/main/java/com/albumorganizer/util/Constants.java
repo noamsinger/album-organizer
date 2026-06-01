@@ -17,6 +17,8 @@ public class Constants {
         "mp4", "mov", "avi", "mkv", "wmv", "flv", "webm", "m4v", "mpg", "mpeg"
     );
 
+    public static final Set<String> ARCHIVE_EXTENSIONS = Set.of("zip", "rar");
+
     // Hash algorithm
     public static final String HASH_ALGORITHM = "SHA-1";
     public static final int HASH_BUFFER_SIZE = 8192; // 8KB

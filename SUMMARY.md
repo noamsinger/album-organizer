@@ -1,18 +1,15 @@
 # Album Organizer - Summary
 
-## Project Status: v1.2.0
+## Project Status: v1.4.0
 
-Album Organizer is a cross-platform desktop application for scanning, organizing, and managing image and video files.
+Album Organizer is a cross-platform desktop application for scanning, organizing, and AI-enhancing image and video files.
 
 ---
 
 ## Quick Start
 
 ```bash
-# Build the application and create installer
 ./build.sh
-
-# Run the app (macOS)
 open "target/dist/Album Organizer.app"
 ```
 
@@ -23,21 +20,37 @@ open "target/dist/Album Organizer.app"
 3. **Scan**: Right-click folder > Full Scan with Hash (or Quick Scan)
 4. **Browse**: Click folders to view files in list or thumbnail mode
 5. **Organize**: Right-click folder > Do Magic > Organize Folder Recursively
-6. **Find Duplicates**: Look for yellow-highlighted rows
+6. **Enhance**: Right-click file > Enhance with AI
+7. **Find Duplicates**: Look for yellow-highlighted rows
 
 ---
 
 ## Key Features
 
-- **Dual-Pane Interface**: Directory tree + file table/thumbnail grid
+- **Dual-Pane Interface**: Directory tree + file table / thumbnail grid
 - **Smart Scanning**: Full Scan with Hash (SHA-1) or Quick Scan (fast, no hashing)
-- **Thumbnail View**: Async loading with spinners, video frame extraction, HEIC support
+- **Archive Support**: ZIP/RAR appear as virtual folders in the tree (🗄); click to browse, double-click entries to open
+- **Thumbnail View**: Async loading with spinners, video frame extraction, HEIC support, archive entry thumbnails
 - **Duplicate Detection**: Yellow-highlighted files with same SHA-1 hash
 - **File Organization**: Date-based folders with resolution splitting (Do Magic > Organize)
-- **Two-Pass Progress**: Separate progress for file reading and thumbnail generation
-- **Organization Reports**: Compressed in memory, written to `/tmp/album-organizer-reports/` on demand
-- **macOS Native**: .app bundle + .dmg installer, single-instance via Launch Services
-- **Graceful Shutdown**: 5-second timeout prevents stalling on quit
+- **AI Image Enhancement**:
+  - Multi-prompt checkbox selection (combine styles, persisted across sessions)
+  - Cloud: Stability AI, OpenAI DALL·E, Google Gemini, Grok xAI
+  - Local: Stable Diffusion WebUI, ComfyUI, InvokeAI, Real-ESRGAN
+  - Output location: next to original, or `targetFolder/AI-Generated/` (configurable in Settings > General)
+- **macOS Native**: images open in Preview; .app bundle + .dmg installer
+
+---
+
+## Settings
+
+`File > Settings...` — three tabs:
+
+| Tab | Contents |
+|-----|----------|
+| **General** | AI output location (next to original or in target folder/AI-Generated) |
+| **Organize** | Copy/Move mode, Year/Month/Day folder structure, resolution thresholds |
+| **AI Enhancement** | API keys / URLs for all cloud and local AI providers |
 
 ---
 
@@ -47,7 +60,7 @@ open "target/dist/Album Organizer.app"
 ./build.sh
 # Output:
 #   target/dist/Album Organizer.app       - macOS app bundle
-#   target/dist/Album Organizer-1.1.0.dmg - macOS installer
+#   target/dist/Album Organizer-1.4.0.dmg - macOS installer
 ```
 
 ---
@@ -57,12 +70,13 @@ open "target/dist/Album Organizer.app"
 ```
 com.albumorganizer/
 ├── AlbumOrganizerApp.java       # Main entry point
-├── controller/                   # UI controllers (MainController)
-├── model/                        # Domain objects (MediaFile, etc.)
-├── service/                      # Business logic (Scanner, Thumbnail, Organize, Metadata)
-├── repository/                   # Data persistence (Config, Snapshot)
+├── controller/                   # UI controllers (MainController, EnhancementDialog, SettingsDialog)
+├── model/                        # Domain objects (MediaFile, DirectoryNode, AlbumOrganizerSettings)
+├── service/                      # Business logic (Scanner, Thumbnail, Organize, Archive, Enhancement)
+│   └── enhancement/              # AI providers + EnhancementConfig + ImageUtils
+├── repository/                   # Data persistence (ConfigRepository, SnapshotRepository)
 ├── task/                         # Background tasks (ScanTask)
-└── util/                         # Utilities (ErrorDialog, FormatUtils, FileTrash)
+└── util/                         # Utilities (ErrorDialog, FormatUtils, FileTrash, Constants)
 ```
 
 ---
@@ -73,6 +87,7 @@ com.albumorganizer/
 - Snapshot cache: `~/.album-organizer/cache.json.gz`
 - Thumbnail cache: `~/.album-organizer/thumbnails/`
 - Reports: `/tmp/album-organizer-reports/album-organizer.YYYY-MM-DD_HH-mm-ss.txt`
+- AI-Generated output: `<targetFolder>/AI-Generated/` (when option is enabled)
 
 ---
 

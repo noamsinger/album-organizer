@@ -23,6 +23,9 @@ public class AlbumOrganizerSettings {
     private int fontSizeFactor; // Font size factor for scaling (0 = 100%)
     private String lastSelectedFolder; // Last selected folder path (for session restore)
     private boolean thumbnailView; // True if thumbnail view was active
+    private boolean showArchivesInTree; // True if archive nodes should appear in tree
+    private boolean aiOutputToTargetFolder; // True = save AI files in targetFolder/AI-Generated/
+    private Path recycleBinFolder; // Folder that acts as recycle bin (null = not configured)
 
     public AlbumOrganizerSettings() {
         // Defaults
@@ -38,6 +41,9 @@ public class AlbumOrganizerSettings {
         this.fontSizeFactor = 0;
         this.lastSelectedFolder = null;
         this.thumbnailView = false;
+        this.showArchivesInTree = true;
+        this.aiOutputToTargetFolder = false;
+        this.recycleBinFolder = null;
     }
 
     public OrganizeMode getMode() {
@@ -134,5 +140,29 @@ public class AlbumOrganizerSettings {
 
     public void setThumbnailView(boolean thumbnailView) {
         this.thumbnailView = thumbnailView;
+    }
+
+    public boolean isShowArchivesInTree() {
+        return showArchivesInTree;
+    }
+
+    public void setShowArchivesInTree(boolean showArchivesInTree) {
+        this.showArchivesInTree = showArchivesInTree;
+    }
+
+    public boolean isAiOutputToTargetFolder() {
+        return aiOutputToTargetFolder;
+    }
+
+    public void setAiOutputToTargetFolder(boolean aiOutputToTargetFolder) {
+        this.aiOutputToTargetFolder = aiOutputToTargetFolder;
+    }
+
+    public Path getRecycleBinFolder() {
+        return recycleBinFolder;
+    }
+
+    public void setRecycleBinFolder(Path recycleBinFolder) {
+        this.recycleBinFolder = recycleBinFolder;
     }
 }

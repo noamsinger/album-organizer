@@ -1,12 +1,12 @@
 # Album Organizer
 
-A cross-platform desktop application for scanning, organizing, and managing image and video files on your local machine.
+A cross-platform desktop application for scanning, organizing, and AI-enhancing image and video files on your local machine.
 
 ## Features
 
 - **Dual-Panel Interface**: Directory tree view on the left, detailed file table on the right
 - **Pale Orange Theme**: Custom pale orange (#FFE5CC) color scheme for window frames, menu bar, status bar, and progress panel
-- **Multiple View Modes**: 
+- **Multiple View Modes**:
   - **List View**: Detailed table with sortable columns
   - **Thumbnail View**: Visual grid of thumbnails with loading spinners
     - Per-file progress indicators during thumbnail generation
@@ -14,16 +14,20 @@ A cross-platform desktop application for scanning, organizing, and managing imag
     - Automatic video frame rotation using FFmpeg displaymatrix
     - HEIC support via macOS sips conversion
     - LRU disk cache (42MB max) at `~/.album-organizer/thumbnails/`
-- **Smart Scanning**: 
+- **Smart Scanning**:
   - **Full Scan with Hash**: Complete recursive scan with SHA-1 hash calculation
     - Smart hash recalculation: only rehashes new, modified, or unhashed files
     - Reuses existing hashes for unchanged files (based on modification date)
-    - Dramatically faster on subsequent scans
   - **Quick Scan**: Ultra-fast scan without hash calculation
-    - Scans file names, modification times, and basic metadata only
+    - Reads file names, modification times, and basic metadata only
     - Preserves existing hashes from previous full scans
     - 10-50x faster than full scan
-    - Ideal for quick updates and file discovery
+- **Archive Support (ZIP/RAR)**:
+  - Archive files appear as virtual folders in the directory tree (🗄 icon)
+  - Click an archive node to browse its contents
+  - Thumbnails generated for images inside archives
+  - Double-click an archive entry to extract to a temp file and open it
+  - Toggle archive visibility via `View > Show Archives in Tree`
 - **Album Folder Management**:
   - Add multiple album folders to scan
   - Set one folder as target folder (marked in purple)
@@ -31,47 +35,41 @@ A cross-platform desktop application for scanning, organizing, and managing imag
 - **File Management**:
   - View detailed metadata: filename, date, date taken (UTC), type, duration, size, resolution, location, SHA-1 hash
   - Date Taken shows EXIF date or estimated date from filename (prefixed with "=>")
-  - Date validation: years must be 1800-2099, dates must be calendar-valid
   - Folder counts show both direct and recursive file counts (e.g., "Photos (5/247)")
-  - Double-click to open files with system default application
-  - Right-click context menu: Copy filename, Copy path, Show in folder, Organize File, Remove Other Duplicates, Delete File
-  - Corrupted files displayed in **pale red background** for easy identification
-  - Selected files: dark blue background with color-coded foreground (white for normal, strong yellow for duplicates, pink for corrupt)
-- **Duplicate Detection**: 
+  - Double-click to open files (images always open in Preview on macOS)
+  - Right-click context menu: Copy filename, Copy path, Show in folder, Organize File, Remove Other Duplicates, Delete File, Enhance with AI
+  - Corrupted files displayed in **pale red background**
+  - Selected files: dark blue background with color-coded foreground
+- **Duplicate Detection**:
   - Automatically identifies duplicate files using SHA-1 hashing
   - Duplicates highlighted with **yellow background**
-  - "Remove Other Duplicates" context menu option with selective checkboxes to choose which duplicates to delete
-  - Memory-optimized duplicate index using HashMap with shared directory paths
+  - "Remove Other Duplicates" with selective checkboxes
 - **File Organization**:
   - Organize single files or entire folder trees to target folder
-  - Folder tree context menu: "Do Magic" > "Organize Folder Recursively"
   - Automatic folder structure: Year/Month/Day based on date taken
-  - Resolution-based splitting: low-res/med-res folders (high-res files at root)
-  - Collision detection with hash verification and automatic filename suffixing
-  - Move mode with integrity verification (copy, verify hash, then delete)
-  - Progress panel shows real-time organizing status with stop capability
-- **Font Size Control**: 
+  - Resolution-based splitting: low-res/med-res folders
+  - Collision detection with hash verification
+  - Move mode with integrity verification
+- **AI Image Enhancement**:
+  - Enhance images using multiple AI providers (cloud and local)
+  - Multi-prompt checkbox selection — combine multiple enhancement styles
+  - Prompt selection and provider choice persisted across sessions
+  - **Cloud providers**: Stability AI, OpenAI DALL·E, Google Gemini, Grok xAI
+  - **Local providers**: Stable Diffusion WebUI, ComfyUI, InvokeAI, Real-ESRGAN
+  - All providers receive images as JPEG (converted in-memory)
+  - Output location configurable: next to original, or in `targetFolder/AI-Generated/`
+- **Settings**:
+  - **General tab**: AI-generated file output location
+  - **Organize tab**: copy/move mode, folder structure, resolution thresholds
+  - **AI Enhancement tab**: per-provider API keys and URLs, with setup instructions
+- **Font Size Control**:
   - Adjustable font size with keyboard shortcuts (Cmd +, Cmd -, Cmd 0)
   - Font size persists between sessions
-  - All dialogs automatically scale with font size and are resizable
-- **Organize Settings**: Configure file organization preferences
-  - Copy or Move mode
-  - Folder structure (Year/Month/Day hierarchies)
-  - Resolution-based splitting (low-res/med-res/high-res)
-  - Customizable pixel thresholds with validation
 - **Progress Panel**: Real-time progress tracking for scans and organize operations
   - Two-pass progress for folder view: scan phase then thumbnail phase
-  - Shows discovered files during operations
   - Stop button to cancel operations mid-process
   - Collapsible panel with hide/show toggle
-  - "View Last Organizing Report" button — persists across scans, writes report to `/tmp/album-organizer-reports/` on demand
-- **Efficient Caching**: 
-  - Single global snapshot cache (`~/.album-organizer/cache.json.gz`)
-  - Compressed JSON format with GZIP for fast startup
-  - Stores file metadata including lastModified timestamps
-  - Automatic cache validation on startup
-  - No hidden files created in user directories
-- **Cross-Platform**: Works on Windows, macOS, and Linux
+  - "View Last Organizing Report" button
 
 ## System Requirements
 
@@ -87,28 +85,15 @@ A cross-platform desktop application for scanning, organizing, and managing imag
 
 ### macOS (Recommended)
 
-Build and install from source:
-
 ```bash
-# Build the application and create installer
 ./build.sh
-
-# Run the app
 open "target/dist/Album Organizer.app"
-
-# Or install from the DMG
-open "target/dist/Album Organizer-1.1.0.dmg"
 ```
-
-macOS handles single-instance natively — double-clicking the app while it's already running will bring the existing window to front.
 
 ### Windows
 
 ```bash
-# Build and package
 build.bat
-
-# Run the app
 start "target\dist\Album Organizer\Album Organizer.exe"
 ```
 
@@ -117,187 +102,93 @@ start "target\dist\Album Organizer\Album Organizer.exe"
 ### Getting Started
 
 1. **Launch the application**
-2. **Add album folders**:
-   - Go to `File > Add Album Folder`
-   - Choose one or more base directories containing your images/videos
-   - Album folders are shown in **bold** in the directory tree
-3. **Set a target folder** (optional):
-   - Right-click an album folder and select "Make Target Folder"
-   - Target folder is shown in **purple** and bold
-4. **Run your first scan**:
-   - Right-click a folder and select "Full Scan with Hash" to perform a complete scan with hash calculation
-   - Or select "Quick Scan" for a fast scan without hashing
-   - Wait for the scan to complete (progress panel shows status)
+2. **Add album folders**: `File > Add Album Folder`
+3. **Set a target folder** (optional): right-click an album folder → "Make Target Folder"
+4. **Run a scan**: right-click a folder → Full Scan with Hash (or Quick Scan)
 
-### Understanding the Interface
+### Directory Tree
 
-#### Left Panel: Directory Tree
-- Shows the hierarchy of scanned directories with file counts
-- **Folder counts** display as "Folder (direct/recursive)" - e.g., "Photos (2/753)"
-  - First number: files directly in that folder
-  - Second number: total files including all subdirectories
-- **Album folders** are displayed in bold
-- **Target folder** is displayed in purple and bold
-- Click a folder to filter the table view to files in that directory
-- Right-click for options: Full Scan with Hash, Quick Scan, Open in file browser, Do Magic > Organize Folder Recursively, Make Target Folder, Unset as Target Folder, Remove from Album Folders
-- Context menu items are always visible (disabled when not applicable) for consistent UX
-- Tree selection is preserved across scans and operations
-- At startup, tree expands to last viewed folder without selecting it (avoids interrupting startup scan)
+- Click a folder to show its files in the right panel
+- Archive files (.zip, .rar) appear as virtual folder nodes — click to browse contents
+- Toggle archive visibility with `View > Show Archives in Tree`
+- Right-click for: Full Scan with Hash, Quick Scan, Open in file browser, Do Magic > Organize Folder Recursively, Make Target Folder, Unset as Target Folder, Remove from Album Folders
 
-#### Right Panel: File Table
-- Displays all scanned image and video files with columns:
-  - **Filename**: Name of the file
-  - **Date**: Last modified date
-  - **Date Taken (UTC)**: EXIF date or estimated from filename (with "=>" prefix)
-  - **Type**: IMAGE or VIDEO
-  - **Duration**: Video length (for video files)
-  - **Size**: File size (formatted as KB/MB/GB)
-  - **Resolution**: Dimensions (width x height pixels)
-  - **Location**: Full directory path
-  - **Hash**: SHA-1 hash for duplicate detection
-- **Double-click** a file to open it with your system's default application
-- **Right-click** for context menu:
-  - Copy filename
-  - Copy path
-  - Show in folder
-  - Organize File (moves/copies to target folder based on date and resolution)
-  - Delete File (moves to trash)
-  - Remove Other Duplicates (selective deletion with checkboxes)
-- **Sort** by clicking column headers
-- **Visual indicators**:
-  - **Duplicates**: Yellow background (same SHA-1 hash)
-  - **Corrupted files**: Pale red background
-  - **Selected files**: Dark blue background with color-coded text
-    - White: normal files
-    - Strong yellow: duplicates
-    - Pink: corrupted files
+### File Table
+
+Columns: Filename, Date, Date Taken (UTC), Type, Duration, Size, Resolution, Location, Hash
+
+- **Double-click**: open file (images open in Preview on macOS)
+- **Right-click**: Copy filename, Copy path, Show in folder, Organize File, Delete File, Remove Other Duplicates, Enhance with AI
+- **Visual indicators**: yellow = duplicate, pale red = corrupted
 
 ### View Modes
 
-Switch between view modes via the `View` menu:
-
+Switch via the `View` menu:
 - **List View**: Detailed table with all metadata columns
-- **Thumbnail View**: Visual grid showing file thumbnails
+- **Thumbnail View**: Visual grid of file thumbnails
 
-### Font Size Control
+### AI Enhancement
 
-Adjust the interface font size:
+1. Right-click a file → **Enhance with AI** (or select it and use the context menu)
+2. In the dialog:
+   - Select one or more prompts using checkboxes (e.g., "Upscale & Sharpen", "Restore Old Photo")
+   - Choose an AI provider from the dropdown
+   - Set output dimensions (optional)
+   - Click **Enhance**
+3. The enhanced file is saved and the folder view refreshes automatically
 
-- **Increase Font Size**: `View > Increase Font Size` or **Cmd +**
-- **Decrease Font Size**: `View > Decrease Font Size` or **Cmd -**
-- **Reset Font Size**: `View > Reset Font Size` or **Cmd 0**
+**Output location** is controlled by `File > Settings > General`:
+- **Next to the original**: saves alongside the source file
+- **In target folder / AI-Generated**: saves to `targetFolder/AI-Generated/`
 
-Font size preference is saved and restored between sessions.
+**Setting up AI providers**: open `File > Settings > AI Enhancement` and follow the Instructions button for each provider.
 
 ### Settings
 
-Configure organize settings via `File > Settings...`:
+`File > Settings...` has three tabs:
 
-1. **Organize Mode**: Copy or Move (move with verification)
-2. **Folder Structure** (cascading checkboxes):
-   - Organize with Year Folder (e.g., 2024/)
-   - Organize with Month Folder (e.g., 2024/01/) - requires Year
-   - Organize with Day Folder (e.g., 2024/01/15/) - requires Month
-3. **Resolution-Based Splitting**:
-   - Split to low resolution folders (low-res/med-res)
-   - Low-res threshold (pixels) - default: 300,000
-   - Hi-res threshold (pixels) - default: 1,000,000
-   - Validation: low-res must be positive, hi-res must be greater than low-res
+**General**
+- AI-generated file location: next to original, or in target folder under `AI-Generated`
 
-Files with date taken will be organized into date-based folders. Files without resolution metadata go into "unknown-resolution" folder. High-res files (above hi-res threshold) are placed at the root level without resolution subfolder.
+**Organize**
+- Organize mode: Copy or Move (with integrity verification)
+- Folder structure: Year / Month / Day hierarchies (cascading)
+- Resolution splitting: low-res / med-res thresholds (pixels)
 
-All settings are persisted in `~/.album-organizer/album-organizer-config.ini`
+**AI Enhancement**
+- Image Cloud AI: Stability AI, OpenAI DALL·E, Google Gemini, Grok xAI (API keys)
+- Image Local AI: Stable Diffusion WebUI, ComfyUI, InvokeAI, Real-ESRGAN (base URLs / paths)
 
 ### Organizing Files
 
-**Organize Single File** (Right-click file → Organize File):
-- Requires target folder to be set
-- Organizes based on date taken (EXIF or estimated from filename)
-- Applies folder structure and resolution settings
-- Handles collisions with hash verification
-- Auto-refreshes views to show organized files
+**Single file**: right-click → Organize File
+**Recursive**: right-click folder → Do Magic → Organize Folder Recursively
 
-**Organize Folder Recursively** (Right-click folder → Do Magic → Organize Folder Recursively):
-- Requires target folder to be set and folder must have files
-- Shows confirmation dialog with file count
-- Recursively organizes all media files in folder and subdirectories
-- Real-time progress in Progress Panel with file-by-file updates
-- Stop button to cancel operation
-- Continues on errors and reports them at end
-- Auto-rescans target folder after completion
+Target path = `targetFolder / YYYY/MM/DD / [resolution] / filename`
 
-**Organization Logic**:
-1. Target path = Target Folder + Date folders + Resolution folder + filename
-2. Date folders: YYYY/MM/DD based on date taken (or "unknown-date")
-3. Resolution folders: "low-res", "med-res", or none for high-res
-4. Collision handling: If file exists, compare hashes
-   - Same hash: skip (already there)
-   - Different hash: append full SHA-1 to filename
-5. Move mode: Copy → Verify hash → Delete original (integrity guaranteed)
+Collision handling: if a file already exists at the target, hashes are compared — same hash means skip, different hash means suffix the filename.
 
-### Progress Panel
+### Scanning
 
-Access via `View > Show Progress Panel` or automatically shown during operations:
+**Full Scan with Hash** — first scan, or when you need duplicate detection. Smart: only rehashes changed files.
 
-- **Shows**: Real-time file discovery and processing
-- **Scrolling list**: Recently discovered/processed files
-- **Progress bar**: Two-pass visual progress (scan then thumbnails)
-- **View Last Organizing Report**: Opens report file from `/tmp/album-organizer-reports/`
-- **Status text**: Current operation and counts
-- **Stop button**: Cancel operation (enabled during active operations)
-- **Hide button**: Collapse panel (always enabled)
-- **Auto-hide**: Panel remains visible after operation for review
+**Quick Scan** — fast updates (10-50x faster). Preserves existing hashes, no duplicate detection for new files until a full scan.
 
-### Scanning Modes
-
-#### Full Scan with Hash (Right-click folder → Full Scan with Hash)
-- Scans all folders recursively for image and video files
-- Calculates SHA-1 hash for duplicate detection
-- **Smart hash recalculation**: Only rehashes files that need it
-  - New files: Always hashed
-  - Modified files: Rehashed if modification date changed
-  - Unchanged files: Reuses existing hash (no I/O, no hashing)
-  - Files without hash (from quick scan): Hashed
-- Extracts metadata (resolution, dates, duration)
-- Validates file integrity (detects corrupted files)
-- **Use when**: 
-  - First scan of a folder
-  - After adding many new files
-  - When you need duplicate detection
-  - After quick scanning and want full hashes
-
-#### Quick Scan (Right-click folder → Quick Scan)
-- **Ultra-fast**: Scans ALL directories recursively without hash calculation
-- Reads file names, modification times, sizes, and basic metadata only
-- **Preserves existing hashes** from previous full scans
-- New files get placeholder hash (no duplicate detection until full scan)
-- 10-50x faster than full scan with hash
-- **Use when**: 
-  - Checking for new/deleted files
-  - Quick updates between full scans
-  - File discovery and counting
-  - When duplicate detection isn't needed immediately
-
-**Recommended Workflow**:
-1. Run "Full Scan with Hash" once on all folders
-2. Use "Quick Scan" for daily/regular updates (instant)
-3. Run "Full Scan with Hash" periodically (only rehashes changed files)
+**Recommended workflow**: Full scan once → Quick scan daily → Full scan periodically.
 
 ### Configuration Files
 
-The application stores configuration in `~/.album-organizer/album-organizer-config.ini`:
+`~/.album-organizer/album-organizer-config.ini`:
 
 ```ini
-# Album Organizer Configuration File
-# This file stores all application settings
-
 [AlbumFolders]
 /Users/username/Pictures
-/Users/username/Videos
 
 [Settings]
 targetFolder=/Users/username/Pictures
 fontSizeFactor=0
+showArchivesInTree=true
+aiOutputToTargetFolder=false
 
 [Organize]
 mode=COPY
@@ -308,111 +199,85 @@ splitLowRes=true
 splitMedRes=true
 lowResThresholdPixels=300000
 hiResThresholdPixels=1000000
+
+[Enhancement]
+stabilityAiEnabled=false
+stabilityAiKey=
+...
 ```
 
 ### Cache Files
 
-**Snapshot Cache** (`~/.album-organizer/cache.json.gz`):
-- Compressed JSON snapshot of entire file index
-- Stores hash, filename, directory, and lastModified timestamp per file
-- Loaded on startup for instant duplicate detection
-- Updated after each scan (full or quick)
-- Enables smart hash recalculation (only rehash when needed)
-- Significantly reduces startup time and scan times for large collections
-- Single global cache - no per-directory cache files
+- Snapshot: `~/.album-organizer/cache.json.gz` — compressed JSON, fast startup
+- Thumbnails: `~/.album-organizer/thumbnails/` — LRU, 42MB max
 
 ## Supported File Formats
 
 ### Images
-- JPG/JPEG, PNG, GIF, BMP, TIFF, WEBP, HEIC, RAW
+JPG/JPEG, PNG, GIF, BMP, TIFF, WEBP, HEIC, RAW
 
 ### Videos
-- MP4, MOV, AVI, MKV, WMV, FLV, WEBM, M4V, MPG, MPEG
+MP4, MOV, AVI, MKV, WMV, FLV, WEBM, M4V, MPG, MPEG
+
+### Archives
+ZIP, RAR
 
 ## Keyboard Shortcuts
 
-- **Cmd +** (or Cmd =): Increase font size
+- **Cmd +** / **Cmd =**: Increase font size
 - **Cmd -**: Decrease font size
-- **Cmd 0**: Reset font size to 100%
+- **Cmd 0**: Reset font size
 
 ## Troubleshooting
 
 ### Application won't start
-- Verify Java 17+ is installed: `java -version`
-- Check that JavaFX is available (included in Java 17+)
-- Try running from command line to see error messages
+- Verify Java 17+: `java -version`
+- Run from terminal to see error output
 
-### Scan is very slow
-- First Full Scan with Hash of large collections (100,000+ files) can take time
-- Use Quick Scan for fast updates (10-50x faster, preserves hashes)
-- Subsequent Full Scans are much faster (only rehashes changed files)
-- Close other resource-intensive applications
-- Consider scanning smaller folder sets
+### Scan is slow
+- Use Quick Scan for regular updates (10-50x faster)
+- Subsequent Full Scans rehash only changed files
 
-### Permission denied errors
-- Ensure you have read access to the folders you're scanning
-- On macOS: Grant "Full Disk Access" in System Preferences > Security & Privacy
-- On Linux: Check file/folder permissions with `ls -la`
+### Permission denied
+- macOS: grant Full Disk Access in System Settings > Privacy & Security
+- Linux: check permissions with `ls -la`
 
-### Files not appearing in table
-- Verify file extensions are supported (see Supported File Formats)
-- Check the file isn't corrupted (corrupted files appear in dark red)
-- Look for error messages in the status bar
+### Files not appearing
+- Verify extension is supported
+- Check the file isn't corrupted (corrupted files appear in pale red)
 
-### Files without resolution
-- Some PNG files may lack standard metadata
-- Application includes fallback PNG header reader for maximum compatibility
-- Videos require proper metadata in MP4/MOV format
+### AI Enhancement failing
+- Check the API key is correct and has credits
+- For local providers, verify the server is running at the configured URL
+- Error messages now parse JSON from the API response for clear diagnostics
 
-### Can't open file on double-click
-- Verify system has default application for that file type
-- Check file hasn't been moved/deleted since scan
-- On Linux: Ensure `xdg-open` is available
-
-### High memory usage
-- Memory-optimized for large collections using HashMap with shared directory paths
-- Expected memory usage: ~310 MB for 1M files (22% reduction vs previous implementation)
-- Filter to specific directories using the tree view to show fewer files
-- Close and restart application to free memory
+### Can't open file
+- macOS images always open in Preview
+- Other files use the system default application
+- Verify the file hasn't been moved since the last scan
 
 ## Building from Source
 
-See [design.md](design.md) and [plan.md](plan.md) for architecture details.
-
 ```bash
-# Clone repository
 git clone <repository-url>
 cd album-organizer
-
-# Build application and create installer (.app + .dmg)
 ./build.sh              # macOS
 build.bat               # Windows
-
-# Run the app (macOS)
-open "target/dist/Album Organizer.app"
-
-# Output:
-#   target/dist/Album Organizer.app      - macOS app bundle
-#   target/dist/Album Organizer-1.1.0.dmg - macOS installer
 ```
+
+See [design.md](design.md) for architecture details.
 
 ## Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 
 [Specify your license here]
 
-## Support
-
-- **Issues**: Report bugs and feature requests at [GitHub Issues](your-repo-url/issues)
-- **Documentation**: See [design.md](design.md) for technical details
-- **Implementation Plan**: See [plan.md](plan.md) for development roadmap
-
 ## Acknowledgments
 
-- Built with [JavaFX](https://openjfx.io/) for cross-platform UI
-- Metadata extraction powered by [metadata-extractor](https://github.com/drewnoakes/metadata-extractor)
-- File utilities from [Apache Commons](https://commons.apache.org/)
+- Built with [JavaFX](https://openjfx.io/)
+- Metadata extraction: [metadata-extractor](https://github.com/drewnoakes/metadata-extractor)
+- Archive support: [Apache Commons Compress](https://commons.apache.org/proper/commons-compress/)
 - VibeCoded by Noam Singer

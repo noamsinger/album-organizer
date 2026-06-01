@@ -1,6 +1,7 @@
 package com.albumorganizer.repository;
 
 import com.albumorganizer.model.AlbumOrganizerSettings;
+import com.albumorganizer.service.enhancement.EnhancementConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -362,6 +363,15 @@ public class ConfigRepository {
                 if (settingsSection.containsKey("thumbnailView")) {
                     settings.setThumbnailView(Boolean.parseBoolean(settingsSection.get("thumbnailView")));
                 }
+                if (settingsSection.containsKey("showArchivesInTree")) {
+                    settings.setShowArchivesInTree(Boolean.parseBoolean(settingsSection.get("showArchivesInTree")));
+                }
+                if (settingsSection.containsKey("aiOutputToTargetFolder")) {
+                    settings.setAiOutputToTargetFolder(Boolean.parseBoolean(settingsSection.get("aiOutputToTargetFolder")));
+                }
+                if (settingsSection.containsKey("recycleBinFolder")) {
+                    settings.setRecycleBinFolder(Paths.get(settingsSection.get("recycleBinFolder")));
+                }
             } catch (Exception e) {
                 logger.warn("Failed to parse target folder or font size factor, using defaults", e);
             }
@@ -404,9 +414,88 @@ public class ConfigRepository {
             settingsSection.remove("lastSelectedFolder");
         }
         settingsSection.put("thumbnailView", String.valueOf(settings.isThumbnailView()));
+        settingsSection.put("showArchivesInTree", String.valueOf(settings.isShowArchivesInTree()));
+        settingsSection.put("aiOutputToTargetFolder", String.valueOf(settings.isAiOutputToTargetFolder()));
+        if (settings.getRecycleBinFolder() != null) {
+            settingsSection.put("recycleBinFolder", settings.getRecycleBinFolder().toString());
+        } else {
+            settingsSection.remove("recycleBinFolder");
+        }
 
         writeIniFile(config);
         logger.debug("Saved organize settings to config file");
+    }
+
+    public EnhancementConfig getEnhancementConfig() {
+        Map<String, Map<String, String>> config = readIniFile();
+        Map<String, String> s = config.getOrDefault("Enhancement", new LinkedHashMap<>());
+        List<com.albumorganizer.service.enhancement.NamedPrompt> savedPrompts = new ArrayList<>();
+        String raw = s.getOrDefault("savedPrompts", "");
+        if (!raw.isBlank()) {
+            for (String entry : raw.split("\\|\\|")) {
+                com.albumorganizer.service.enhancement.NamedPrompt np =
+                    com.albumorganizer.service.enhancement.NamedPrompt.deserialize(entry.trim());
+                if (np != null) savedPrompts.add(np);
+            }
+        }
+        return new EnhancementConfig(
+            Boolean.parseBoolean(s.getOrDefault("stabilityAiEnabled", "false")),
+            s.getOrDefault("stabilityAiKey", ""),
+            Boolean.parseBoolean(s.getOrDefault("openAiEnabled", "false")),
+            s.getOrDefault("openAiKey", ""),
+            Boolean.parseBoolean(s.getOrDefault("geminiEnabled", "false")),
+            s.getOrDefault("geminiKey", ""),
+            Boolean.parseBoolean(s.getOrDefault("grokEnabled", "false")),
+            s.getOrDefault("grokKey", ""),
+            Boolean.parseBoolean(s.getOrDefault("sdLocalEnabled", "false")),
+            s.getOrDefault("sdLocalUrl", "http://localhost:7860"),
+            Boolean.parseBoolean(s.getOrDefault("realEsrganEnabled", "false")),
+            s.getOrDefault("realEsrganModelPath", ""),
+            Boolean.parseBoolean(s.getOrDefault("comfyUiEnabled", "false")),
+            s.getOrDefault("comfyUiUrl", "http://localhost:8188"),
+            Boolean.parseBoolean(s.getOrDefault("invokeAiEnabled", "false")),
+            s.getOrDefault("invokeAiUrl", "http://localhost:9090"),
+            savedPrompts,
+            parseCheckedTitles(s.getOrDefault("checkedPromptTitles", ""))
+        );
+    }
+
+    public void setEnhancementConfig(EnhancementConfig cfg) {
+        Map<String, Map<String, String>> config = readIniFile();
+        Map<String, String> s = new LinkedHashMap<>();
+        s.put("stabilityAiEnabled", String.valueOf(cfg.stabilityAiEnabled()));
+        s.put("stabilityAiKey", cfg.stabilityAiKey());
+        s.put("openAiEnabled", String.valueOf(cfg.openAiEnabled()));
+        s.put("openAiKey", cfg.openAiKey());
+        s.put("geminiEnabled", String.valueOf(cfg.geminiEnabled()));
+        s.put("geminiKey", cfg.geminiKey());
+        s.put("grokEnabled", String.valueOf(cfg.grokEnabled()));
+        s.put("grokKey", cfg.grokKey());
+        s.put("sdLocalEnabled", String.valueOf(cfg.sdLocalEnabled()));
+        s.put("sdLocalUrl", cfg.sdLocalUrl());
+        s.put("realEsrganEnabled", String.valueOf(cfg.realEsrganEnabled()));
+        s.put("realEsrganModelPath", cfg.realEsrganModelPath());
+        s.put("comfyUiEnabled", String.valueOf(cfg.comfyUiEnabled()));
+        s.put("comfyUiUrl", cfg.comfyUiUrl());
+        s.put("invokeAiEnabled", String.valueOf(cfg.invokeAiEnabled()));
+        s.put("invokeAiUrl", cfg.invokeAiUrl());
+        if (cfg.savedPrompts() != null && !cfg.savedPrompts().isEmpty()) {
+            s.put("savedPrompts", cfg.savedPrompts().stream()
+                .map(com.albumorganizer.service.enhancement.NamedPrompt::serialize)
+                .collect(java.util.stream.Collectors.joining("||")));
+        } else {
+            s.remove("savedPrompts");
+        }
+        if (cfg.checkedPromptTitles() != null && !cfg.checkedPromptTitles().isEmpty()) {
+            s.put("checkedPromptTitles", cfg.checkedPromptTitles().stream()
+                .map(t -> t.replace("||", "__PIPE__"))
+                .collect(java.util.stream.Collectors.joining("||")));
+        } else {
+            s.remove("checkedPromptTitles");
+        }
+        config.put("Enhancement", s);
+        writeIniFile(config);
+        logger.debug("Saved enhancement config");
     }
 
     /**
@@ -431,5 +520,15 @@ public class ConfigRepository {
         } catch (BackingStoreException e) {
             logger.error("Failed to flush preferences", e);
         }
+    }
+
+    private static List<String> parseCheckedTitles(String raw) {
+        if (raw == null || raw.isBlank()) return new ArrayList<>();
+        List<String> result = new ArrayList<>();
+        for (String t : raw.split("\\|\\|")) {
+            String title = t.trim().replace("__PIPE__", "||");
+            if (!title.isBlank()) result.add(title);
+        }
+        return result;
     }
 }

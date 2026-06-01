@@ -42,6 +42,11 @@ public class FileTypeDetector {
         return extension != null && Constants.VIDEO_EXTENSIONS.contains(extension);
     }
 
+    public static boolean isArchive(Path path) {
+        String extension = getExtension(path);
+        return extension != null && Constants.ARCHIVE_EXTENSIONS.contains(extension);
+    }
+
     /**
      * Gets the media type for a file.
      *

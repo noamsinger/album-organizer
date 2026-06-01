@@ -4,18 +4,28 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.LoggerContext;
 import com.albumorganizer.model.DirectoryNode;
 import com.albumorganizer.model.MediaFile;
+import com.albumorganizer.model.MediaType;
 import com.albumorganizer.model.FileIndexEntry;
 import javafx.collections.FXCollections;
 import com.albumorganizer.model.AlbumOrganizerSettings;
 import com.albumorganizer.model.ScanResult;
 import com.albumorganizer.repository.ConfigRepository;
+import com.albumorganizer.repository.RecycleBinRepository;
 import com.albumorganizer.repository.SnapshotRepository;
 import com.albumorganizer.service.ScannerService;
 import com.albumorganizer.service.DirectoryScanService;
 import com.albumorganizer.service.FileOrganizeService;
 import com.albumorganizer.service.OrganizeReportWriter;
 import com.albumorganizer.service.ThumbnailService;
+import com.albumorganizer.service.ArchiveScanService;
+import com.albumorganizer.service.enhancement.EnhancementConfig;
+import com.albumorganizer.service.enhancement.EnhancementProvider;
+import com.albumorganizer.service.enhancement.EnhancementRequest;
+import com.albumorganizer.service.enhancement.EnhancementResult;
+import com.albumorganizer.service.enhancement.ImageEnhancementService;
+import com.albumorganizer.service.enhancement.NamedPrompt;
 import com.albumorganizer.task.ScanTask;
+import com.albumorganizer.controller.EnhancementDialog;
 import com.albumorganizer.util.ErrorDialog;
 import com.albumorganizer.util.FileTrashUtil;
 import com.albumorganizer.util.FormatUtils;
@@ -65,6 +75,9 @@ public class MainController {
 
     private static final Logger logger = LoggerFactory.getLogger(MainController.class);
     private static final String NO_HASH_KEY = "__NO_HASH__"; // Special key for files without hashes (quick scan)
+    // Sentinel Image returned by loadThumbnailAsync to signal an audio-only file (no video stream)
+    private static final javafx.scene.image.WritableImage AUDIO_ONLY_SENTINEL =
+            new javafx.scene.image.WritableImage(1, 1);
 
     @FXML private BorderPane rootPane;
     @FXML private SplitPane mainSplitPane;
@@ -93,6 +106,7 @@ public class MainController {
     @FXML private ProgressBar progressBar;
     @FXML private ListView<String> progressLogList;
     @FXML private CheckMenuItem showProgressPanelMenuItem;
+    @FXML private CheckMenuItem showArchivesMenuItem;
     @FXML private RadioMenuItem logLevelDebugMenuItem;
     @FXML private RadioMenuItem logLevelInfoMenuItem;
     @FXML private RadioMenuItem logLevelWarnMenuItem;
@@ -111,6 +125,8 @@ public class MainController {
     private final ConfigRepository configRepository;
     private final SnapshotRepository snapshotRepository;
     private final ThumbnailService thumbnailService;
+    private final ArchiveScanService archiveScanService;
+    private ImageEnhancementService imageEnhancementService;
     private final Map<String, List<FileIndexEntry>> fileIndex; // Hash -> List of (directory, filename) pairs
     private List<Path> baseFolders;
     private List<Path> currentlyScannedFolders; // Track which folders are being scanned
@@ -124,7 +140,12 @@ public class MainController {
     private ExecutorService thumbnailLoadExecutor;
     private AlbumOrganizerSettings settings; // All settings including targetFolder and fontSizeFactor
     private Path currentSelectedDirectory; // Currently selected directory for on-demand scanning
-    // REMOVED: private int progressFileCounter = 0; // Counter for discovered files during scan
+    private com.albumorganizer.service.enhancement.EnhancementProvider lastUsedProvider = null;
+    private MediaFile selectedThumbnailFile = null;
+    private String lastUsedPromptTitle = null; // kept for back-compat, unused
+    private String lastAdditionalPrompt = "";
+    private List<String> lastCheckedPromptTitles = new ArrayList<>();
+    private final RecycleBinRepository recycleBinRepository = new RecycleBinRepository();
 
     public MainController() {
         this.scannerService = new ScannerService();
@@ -132,6 +153,8 @@ public class MainController {
         this.configRepository = new ConfigRepository();
         this.snapshotRepository = new SnapshotRepository();
         this.thumbnailService = new ThumbnailService();
+        this.archiveScanService = new ArchiveScanService();
+        this.imageEnhancementService = new ImageEnhancementService(configRepository);
         this.fileIndex = new HashMap<>();
         this.baseFolders = new ArrayList<>();
         this.currentlyScannedFolders = new ArrayList<>();
@@ -191,6 +214,9 @@ public class MainController {
             thumbnailScrollPane.setVisible(true);
             thumbnailViewMenuItem.setSelected(true);
         }
+
+        // Restore show-archives setting
+        showArchivesMenuItem.setSelected(settings.isShowArchivesInTree());
 
         syncLogLevelMenu();
 
@@ -330,6 +356,18 @@ public class MainController {
                         }
                         // Normal files have no special class
                     }
+
+                    // Tooltip: show original path for files in the recycle bin
+                    if (!empty && item != null) {
+                        Path origPath = recycleBinRepository.getOriginalPath(item.getAbsolutePath());
+                        if (origPath != null) {
+                            setTooltip(new Tooltip("Original: " + origPath));
+                        } else {
+                            setTooltip(null);
+                        }
+                    } else {
+                        setTooltip(null);
+                    }
                 }
             };
 
@@ -392,11 +430,35 @@ public class MainController {
             }
         });
 
+        MenuItem deleteFileItem = new MenuItem("Delete File");
+        deleteFileItem.setOnAction(e -> {
+            MediaFile selected = mediaTable.getSelectionModel().getSelectedItem();
+            if (selected != null) {
+                deleteFile(selected);
+            }
+        });
+
+        MenuItem restoreFromBinItem = new MenuItem("Restore to Original Location");
+        restoreFromBinItem.setOnAction(e -> {
+            MediaFile selected = mediaTable.getSelectionModel().getSelectedItem();
+            if (selected != null) {
+                restoreFromBin(selected);
+            }
+        });
+
         MenuItem organizeFileItem = new MenuItem("Organize File");
         organizeFileItem.setOnAction(e -> {
             MediaFile selected = mediaTable.getSelectionModel().getSelectedItem();
             if (selected != null) {
                 organizeFile(selected);
+            }
+        });
+
+        MenuItem enhanceWithAiItem = new MenuItem("Enhance with AI...");
+        enhanceWithAiItem.setOnAction(e -> {
+            MediaFile selected = mediaTable.getSelectionModel().getSelectedItem();
+            if (selected != null) {
+                openEnhancementDialog(selected);
             }
         });
 
@@ -406,9 +468,19 @@ public class MainController {
             boolean hasDuplicates = selected != null && hasDuplicates(selected);
             removeOtherDuplicatesItem.setDisable(!hasDuplicates);
 
-            // Only enable "Organize File" if target folder is set
+            boolean hasBin = settings != null && settings.getRecycleBinFolder() != null;
+            deleteFileItem.setDisable(selected == null || !hasBin);
+
+            boolean isInBin = selected != null && hasBin
+                && recycleBinRepository.isInBin(selected.getAbsolutePath());
+            restoreFromBinItem.setVisible(isInBin);
+
             boolean hasTargetFolder = settings != null && settings.getTargetFolder() != null;
             organizeFileItem.setDisable(!hasTargetFolder);
+
+            boolean hasProviders = !imageEnhancementService.getConfiguredProviders().isEmpty();
+            enhanceWithAiItem.setDisable(selected == null || !hasProviders
+                || selected.getType() != MediaType.IMAGE);
         });
 
         contextMenu.getItems().addAll(
@@ -419,8 +491,12 @@ public class MainController {
             copyFilenameItem,
             new SeparatorMenuItem(),
             removeOtherDuplicatesItem,
+            deleteFileItem,
+            restoreFromBinItem,
             new SeparatorMenuItem(),
-            organizeFileItem
+            organizeFileItem,
+            new SeparatorMenuItem(),
+            enhanceWithAiItem
         );
 
         mediaTable.setContextMenu(contextMenu);
@@ -428,6 +504,14 @@ public class MainController {
 
     private void setupTreeContextMenu() {
         ContextMenu contextMenu = new ContextMenu();
+
+        MenuItem scanArchiveItem = new MenuItem("Scan Archive");
+        scanArchiveItem.setOnAction(e -> {
+            TreeItem<DirectoryNode> selected = directoryTree.getSelectionModel().getSelectedItem();
+            if (selected != null && selected.getValue().isArchiveNode()) {
+                scanArchiveNode(selected);
+            }
+        });
 
         MenuItem fullScanWithHashItem = new MenuItem("Full Scan with Hash");
         fullScanWithHashItem.setOnAction(e -> {
@@ -474,11 +558,27 @@ public class MainController {
             clearTargetFolder();
         });
 
+        MenuItem clearRecycleBinItem = new MenuItem("Unset as Recycle-Bin Folder");
+        clearRecycleBinItem.setOnAction(e -> {
+            settings.setRecycleBinFolder(null);
+            configRepository.setOrganizeSettings(settings);
+            buildDirectoryTree();
+            statusLabel.setText("Recycle-bin folder cleared");
+        });
+
         MenuItem organizeFolderRecursivelyItem = new MenuItem("Organize Folder Recursively");
         organizeFolderRecursivelyItem.setOnAction(e -> {
             TreeItem<DirectoryNode> selected = directoryTree.getSelectionModel().getSelectedItem();
             if (selected != null && selected.getValue().getPath() != null) {
                 organizeFolderRecursively(selected.getValue());
+            }
+        });
+
+        MenuItem removeDuplicatesInFolderItem = new MenuItem("Remove Other Duplicates");
+        removeDuplicatesInFolderItem.setOnAction(e -> {
+            TreeItem<DirectoryNode> selected = directoryTree.getSelectionModel().getSelectedItem();
+            if (selected != null && selected.getValue().getPath() != null) {
+                removeOtherDuplicatesInSubtree(selected.getValue().getPath());
             }
         });
 
@@ -489,21 +589,33 @@ public class MainController {
             boolean hasPath = selected != null && selected.getValue().getPath() != null;
             boolean isCurrentTarget = selected != null && selected.getValue().getPath() != null
                 && selected.getValue().getPath().equals(settings.getTargetFolder());
+            boolean isRecycleBin = selected != null && selected.getValue().isRecycleBin();
             boolean canOrganizeRecursively = selected != null && selected.getValue().getRecursiveFileCount() > 0
                 && settings.getTargetFolder() != null;
+            boolean isArchive = selected != null && selected.getValue().isArchiveNode();
 
-            fullScanWithHashItem.setDisable(!hasPath);
-            quickScanItem.setDisable(!hasPath);
-            removeAlbumItem.setDisable(!isAlbum);
-            makeTargetItem.setDisable(!isAlbum || isCurrentTarget);
+            // "Remove Other Duplicates": need bin configured and at least one external duplicate in subtree
+            boolean hasBin = settings.getRecycleBinFolder() != null;
+            boolean hasExternalDuplicates = hasPath && !isRecycleBin && !isArchive
+                && subtreeHasExternalDuplicates(selected.getValue().getPath());
+            removeDuplicatesInFolderItem.setDisable(!hasBin || !hasExternalDuplicates);
+
+            scanArchiveItem.setVisible(isArchive);
+            fullScanWithHashItem.setDisable(!hasPath || isArchive);
+            quickScanItem.setDisable(!hasPath || isArchive);
+            removeAlbumItem.setDisable(!isAlbum || isRecycleBin);
+            makeTargetItem.setDisable(!isAlbum || isCurrentTarget || isRecycleBin);
             clearTargetItem.setDisable(!isCurrentTarget);
+            clearRecycleBinItem.setVisible(isRecycleBin);
             organizeFolderRecursivelyItem.setDisable(!canOrganizeRecursively);
         });
 
         Menu doMagicMenu = new Menu("Do Magic");
-        doMagicMenu.getItems().add(organizeFolderRecursivelyItem);
+        doMagicMenu.getItems().addAll(organizeFolderRecursivelyItem, removeDuplicatesInFolderItem);
 
         contextMenu.getItems().addAll(
+            scanArchiveItem,
+            new SeparatorMenuItem(),
             fullScanWithHashItem,
             quickScanItem,
             new SeparatorMenuItem(),
@@ -513,6 +625,7 @@ public class MainController {
             new SeparatorMenuItem(),
             makeTargetItem,
             clearTargetItem,
+            clearRecycleBinItem,
             new SeparatorMenuItem(),
             removeAlbumItem
         );
@@ -545,11 +658,15 @@ public class MainController {
     }
 
     private void setupDirectoryTree() {
-        // Tree selection listener - triggers on-demand scan of selected directory
+        // Tree selection listener - triggers on-demand scan of selected directory or archive
         directoryTree.getSelectionModel().selectedItemProperty().addListener(
             (observable, oldValue, newValue) -> {
-                if (newValue != null && newValue.getValue().getPath() != null) {
-                    onDirectorySelected(newValue.getValue().getPath());
+                if (newValue == null || newValue.getValue() == null) return;
+                DirectoryNode val = newValue.getValue();
+                if (val.isArchiveNode()) {
+                    scanArchiveNode(newValue);
+                } else if (val.getPath() != null) {
+                    onDirectorySelected(val.getPath());
                 }
             });
 
@@ -561,11 +678,24 @@ public class MainController {
                 if (empty || item == null) {
                     setText(null);
                     setStyle("");
+                    setGraphic(null);
                     setTooltip(null);
                 } else {
                     setText(item.toString());
+                    // Archive icon
+                    if (item.isArchiveNode()) {
+                        Label icon = new Label("🗄"); // 🗄 file-cabinet emoji as archive icon
+                        icon.setStyle("-fx-font-size: 0.85em;");
+                        setGraphic(icon);
+                    } else {
+                        setGraphic(null);
+                    }
                     // Tooltip with tilde-shortened full path
-                    if (item.getPath() != null) {
+                    if (item.getArchivePath() != null) {
+                        String fullPath = item.getArchivePath().toString()
+                            .replace(System.getProperty("user.home"), "~");
+                        setTooltip(new Tooltip(fullPath + " [" + item.getArchiveType() + "]"));
+                    } else if (item.getPath() != null) {
                         String fullPath = item.getPath().toString()
                             .replace(System.getProperty("user.home"), "~");
                         setTooltip(new Tooltip(fullPath));
@@ -575,6 +705,14 @@ public class MainController {
                     // Target folder: purple and bold
                     if (item.getPath() != null && item.getPath().equals(settings.getTargetFolder())) {
                         setStyle("-fx-font-weight: bold; -fx-text-fill: purple;");
+                    }
+                    // Recycle-bin folder: red and bold
+                    else if (item.isRecycleBin()) {
+                        setStyle("-fx-font-weight: bold; -fx-text-fill: red;");
+                    }
+                    // Archive node: italic
+                    else if (item.isArchiveNode()) {
+                        setStyle("-fx-font-style: italic;");
                     }
                     // Regular album folder: bold
                     else if (item.isAlbum()) {
@@ -662,10 +800,12 @@ public class MainController {
 
             updateFileCount(files.size());
             highlightDuplicates();
-            // Re-apply current table sort order
-            if (!mediaTable.getSortOrder().isEmpty()) {
-                mediaTable.sort();
+            // Re-apply current table sort order; fall back to name ascending if none set
+            if (mediaTable.getSortOrder().isEmpty()) {
+                filenameColumn.setSortType(TableColumn.SortType.ASCENDING);
+                mediaTable.getSortOrder().add(filenameColumn);
             }
+            mediaTable.sort();
 
             if (usingProgressBar) {
                 progressBar.setProgress(0);
@@ -706,21 +846,56 @@ public class MainController {
         }
 
         try {
-            if (Desktop.isDesktopSupported()) {
-                Desktop desktop = Desktop.getDesktop();
-                File file = mediaFile.getAbsolutePath().toFile();
-                if (file.exists()) {
-                    desktop.open(file);
-                    logger.debug("Opened file: {}", file);
-                } else {
-                    showError("File Not Found", "File does not exist: " + file);
-                }
-            } else {
+            if (!Desktop.isDesktopSupported()) {
                 showError("Not Supported", "Opening files is not supported on this platform");
+                return;
+            }
+
+            // Archive entry: extract to a temp file first
+            if (com.albumorganizer.service.ArchiveScanService.isArchiveEntry(mediaFile.getAbsolutePath())) {
+                String[] parts = com.albumorganizer.service.ArchiveScanService
+                    .splitArchivePath(mediaFile.getAbsolutePath());
+                if (parts == null) {
+                    showError("Error", "Could not parse archive path");
+                    return;
+                }
+                byte[] bytes = archiveScanService.extractEntry(
+                    java.nio.file.Paths.get(parts[0]), parts[1]);
+                if (bytes == null) {
+                    showError("Not Found", "Entry not found in archive: " + parts[1]);
+                    return;
+                }
+                String suffix = mediaFile.getFilename().contains(".")
+                    ? mediaFile.getFilename().substring(mediaFile.getFilename().lastIndexOf('.'))
+                    : "";
+                Path tempFile = Files.createTempFile("album_arch_", suffix);
+                Files.write(tempFile, bytes);
+                tempFile.toFile().deleteOnExit();
+                openWithPreviewIfImage(tempFile.toFile(), mediaFile.getType());
+                logger.debug("Opened archive entry via temp file: {}", tempFile);
+                return;
+            }
+
+            File file = mediaFile.getAbsolutePath().toFile();
+            if (file.exists()) {
+                openWithPreviewIfImage(file, mediaFile.getType());
+                logger.debug("Opened file: {}", file);
+            } else {
+                showError("File Not Found", "File does not exist: " + file);
             }
         } catch (IOException e) {
             logger.error("Failed to open file: {}", mediaFile.getAbsolutePath(), e);
             showError("Error Opening File", "Failed to open file: " + e.getMessage());
+        }
+    }
+
+    private void openWithPreviewIfImage(File file, MediaType type) throws IOException {
+        // On macOS, always open images with Preview for a consistent experience
+        if (type == MediaType.IMAGE && System.getProperty("os.name", "").toLowerCase().contains("mac")) {
+            new ProcessBuilder("open", "-a", "Preview", file.getAbsolutePath())
+                .start();
+        } else {
+            Desktop.getDesktop().open(file);
         }
     }
 
@@ -855,18 +1030,92 @@ public class MainController {
     @FXML
     private void onSettings() {
         double fontScale = Math.pow(2.0, settings.getFontSizeFactor() / 4.0);
-        SettingsDialog dialog = new SettingsDialog(settings, fontScale);
+        SettingsDialog dialog = new SettingsDialog(settings, configRepository.getEnhancementConfig(), fontScale);
+        dialog.initOwner(rootPane.getScene().getWindow());
 
-        dialog.showAndWait().ifPresent(newSettings -> {
-            // Update organize settings but preserve targetFolder and fontSizeFactor
+        dialog.showAndWait().ifPresent(result -> {
+            AlbumOrganizerSettings newSettings = result.settings();
             newSettings.setTargetFolder(settings.getTargetFolder());
             newSettings.setFontSizeFactor(settings.getFontSizeFactor());
+            newSettings.setShowArchivesInTree(settings.isShowArchivesInTree());
             settings = newSettings;
             configRepository.setOrganizeSettings(settings);
+            configRepository.setEnhancementConfig(result.enhancementConfig());
+            imageEnhancementService.reloadProviders();
             statusLabel.setText("Settings saved");
             logger.info("Settings updated: mode={}, createYear={}, createMonth={}, createDay={}, splitLowRes={}, splitMedRes={}",
                 newSettings.getMode(), newSettings.isCreateYearFolder(), newSettings.isCreateMonthFolder(),
                 newSettings.isCreateDayFolder(), newSettings.isSplitLowRes(), newSettings.isSplitMedRes());
+        });
+    }
+
+    private void openEnhancementDialog(MediaFile mediaFile) {
+        double fontScale = Math.pow(2.0, settings.getFontSizeFactor() / 4.0);
+        EnhancementConfig enhancementConfig = configRepository.getEnhancementConfig();
+        List<NamedPrompt> savedPrompts = ImageEnhancementService.seedPrompts(enhancementConfig.savedPrompts());
+        // Load persisted checked titles if we haven't overridden them yet this session
+        if (lastCheckedPromptTitles.isEmpty() && !enhancementConfig.checkedPromptTitles().isEmpty()) {
+            lastCheckedPromptTitles = new ArrayList<>(enhancementConfig.checkedPromptTitles());
+        }
+
+        // Resolve output directory based on settings
+        Path outputDir = null;
+        if (settings.isAiOutputToTargetFolder() && settings.getTargetFolder() != null) {
+            outputDir = settings.getTargetFolder().resolve("AI-Generated");
+        }
+
+        EnhancementDialog dialog = new EnhancementDialog(
+            mediaFile,
+            imageEnhancementService.getConfiguredProviders(),
+            savedPrompts,
+            fontScale,
+            lastUsedProvider,
+            lastCheckedPromptTitles,
+            lastAdditionalPrompt,
+            updatedPrompts -> {
+                EnhancementConfig current = configRepository.getEnhancementConfig();
+                EnhancementConfig updated = new EnhancementConfig(
+                    current.stabilityAiEnabled(), current.stabilityAiKey(),
+                    current.openAiEnabled(), current.openAiKey(),
+                    current.geminiEnabled(), current.geminiKey(),
+                    current.grokEnabled(), current.grokKey(),
+                    current.sdLocalEnabled(), current.sdLocalUrl(),
+                    current.realEsrganEnabled(), current.realEsrganModelPath(),
+                    current.comfyUiEnabled(), current.comfyUiUrl(),
+                    current.invokeAiEnabled(), current.invokeAiUrl(),
+                    new ArrayList<>(updatedPrompts),
+                    lastCheckedPromptTitles
+                );
+                configRepository.setEnhancementConfig(updated);
+            },
+            provider -> lastUsedProvider = provider,
+            checkedTitles -> {
+                lastCheckedPromptTitles = new ArrayList<>(checkedTitles);
+                EnhancementConfig current = configRepository.getEnhancementConfig();
+                EnhancementConfig updated = new EnhancementConfig(
+                    current.stabilityAiEnabled(), current.stabilityAiKey(),
+                    current.openAiEnabled(), current.openAiKey(),
+                    current.geminiEnabled(), current.geminiKey(),
+                    current.grokEnabled(), current.grokKey(),
+                    current.sdLocalEnabled(), current.sdLocalUrl(),
+                    current.realEsrganEnabled(), current.realEsrganModelPath(),
+                    current.comfyUiEnabled(), current.comfyUiUrl(),
+                    current.invokeAiEnabled(), current.invokeAiUrl(),
+                    current.savedPrompts(),
+                    lastCheckedPromptTitles
+                );
+                configRepository.setEnhancementConfig(updated);
+            },
+            additionalPrompt -> lastAdditionalPrompt = additionalPrompt,
+            outputDir);
+        dialog.initOwner(rootPane.getScene().getWindow());
+        dialog.showAndWait().ifPresent(result -> {
+            if (result.success()) {
+                statusLabel.setText("Enhanced image saved: " + result.outputPath().getFileName());
+                quickScanFolder(result.outputPath().getParent());
+            } else {
+                ErrorDialog.show("Enhancement Failed", "Enhancement failed", result.errorMessage());
+            }
         });
     }
 
@@ -895,6 +1144,24 @@ public class MainController {
         if (selectedDirectory != null) {
             Path newPath = selectedDirectory.toPath();
             addAlbumFolder(newPath, true);
+        }
+    }
+
+    @FXML
+    private void onAddRecycleBinFolder() {
+        DirectoryChooser directoryChooser = new DirectoryChooser();
+        directoryChooser.setTitle("Select Recycle-Bin Folder");
+
+        Stage stage = (Stage) rootPane.getScene().getWindow();
+        File selectedDirectory = directoryChooser.showDialog(stage);
+
+        if (selectedDirectory != null) {
+            Path newPath = selectedDirectory.toPath();
+            settings.setRecycleBinFolder(newPath);
+            configRepository.setOrganizeSettings(settings);
+            buildDirectoryTree();
+            statusLabel.setText("Recycle-bin folder set: " + newPath.getFileName());
+            logger.info("Set recycle-bin folder: {}", newPath);
         }
     }
 
@@ -1301,6 +1568,15 @@ public class MainController {
 
         // Force table to refresh all rows by triggering a layout update
         mediaTable.refresh();
+
+        // Refresh thumbnail card borders to reflect duplicate status
+        if (thumbnailViewActive) {
+            for (var node : thumbnailPane.getChildren()) {
+                if (!(node instanceof javafx.scene.layout.VBox card)) continue;
+                if (!(card.getUserData() instanceof MediaFile mf)) continue;
+                applyThumbnailCardStyle(card, mf, mf == selectedThumbnailFile, false);
+            }
+        }
     }
 
     private void buildDirectoryTree() {
@@ -1350,6 +1626,21 @@ public class MainController {
             String name2 = item2.getValue().getDisplayName();
             return name1.compareToIgnoreCase(name2);
         });
+
+        // Add recycle-bin folder at the bottom if configured
+        if (settings.getRecycleBinFolder() != null) {
+            Path binPath = settings.getRecycleBinFolder();
+            String binName = binPath.getFileName() != null ? binPath.getFileName().toString() : binPath.toString();
+            DirectoryNode binNode = new DirectoryNode(binPath, binName, true);
+            binNode.setRecycleBin(true);
+            TreeItem<DirectoryNode> binItem = new TreeItem<>(binNode);
+            binItem.setExpanded(false);
+            buildSubtree(binItem, binPath);
+            root.getChildren().add(binItem);
+            if (currentlySelectedPath != null && binPath.equals(currentlySelectedPath)) {
+                itemToSelect = binItem;
+            }
+        }
 
         directoryTree.setRoot(root);
 
@@ -1469,6 +1760,14 @@ public class MainController {
         // Sort all children recursively (case-insensitive)
         sortTreeItemsRecursively(parentItem);
 
+        // Add archive nodes for any .zip/.rar files found in all directories of this tree
+        if (settings != null && settings.isShowArchivesInTree()) {
+            Set<Path> allDirs = new java.util.HashSet<>(pathToItem.keySet());
+            for (Path dir : allDirs) {
+                addArchiveChildNodes(pathToItem.get(dir), dir);
+            }
+        }
+
         // Update file count for album node
         long albumFileCount = fileIndex.values().stream()
             .flatMap(List::stream)
@@ -1503,6 +1802,81 @@ public class MainController {
         node.setRecursiveFileCount(totalCount);
 
         return totalCount;
+    }
+
+    /** Scans a directory for archive files and adds them as child nodes of the given tree item. */
+    private void addArchiveChildNodes(TreeItem<DirectoryNode> dirItem, Path dir) {
+        if (!Files.isDirectory(dir)) return;
+        try (var stream = Files.list(dir)) {
+            stream
+                .filter(p -> com.albumorganizer.util.FileTypeDetector.isArchive(p))
+                .sorted(Comparator.comparing(p -> p.getFileName().toString().toLowerCase()))
+                .forEach(archivePath -> {
+                    String ext = archivePath.getFileName().toString()
+                        .toLowerCase().endsWith(".zip") ? "ZIP" : "RAR";
+                    DirectoryNode archiveNode = new DirectoryNode(
+                        archivePath, // path is the archive file itself (used for display/navigation)
+                        archivePath.getFileName().toString()
+                    );
+                    archiveNode.setArchiveType(ext);
+                    archiveNode.setArchivePath(archivePath);
+                    TreeItem<DirectoryNode> archiveItem = new TreeItem<>(archiveNode);
+                    dirItem.getChildren().add(archiveItem);
+                });
+        } catch (IOException e) {
+            logger.warn("Could not list directory for archive detection: {}", dir, e);
+        }
+    }
+
+    /** Scans an archive node and populates the file view with its contents. */
+    private void scanArchiveNode(TreeItem<DirectoryNode> archiveItem) {
+        DirectoryNode archiveNode = archiveItem.getValue();
+        Path archivePath = archiveNode.getArchivePath();
+
+        statusLabel.setText("Scanning archive: " + archiveNode.getDisplayName() + "...");
+        progressBar.progressProperty().unbind();
+        progressBar.setProgress(ProgressBar.INDETERMINATE_PROGRESS);
+        progressBar.setVisible(true);
+        progressBar.setManaged(true);
+
+        Task<List<MediaFile>> task = new Task<>() {
+            @Override
+            protected List<MediaFile> call() throws Exception {
+                return archiveScanService.scanArchive(archivePath);
+            }
+        };
+
+        task.setOnSucceeded(ev -> {
+            List<MediaFile> files = task.getValue();
+            progressBar.progressProperty().unbind();
+            progressBar.setVisible(false);
+            progressBar.setManaged(false);
+            archiveNode.setMediaFileCount(files.size());
+            archiveNode.setScanned(true);
+            directoryTree.refresh();
+
+            currentDisplayedFiles.setAll(files);
+            updateFileCount(files.size());
+            if (mediaTable.getSortOrder().isEmpty()) {
+                filenameColumn.setSortType(TableColumn.SortType.ASCENDING);
+                mediaTable.getSortOrder().add(filenameColumn);
+            }
+            mediaTable.sort();
+            refreshCurrentView();
+            statusLabel.setText(String.format("Archive: %s — %d media files",
+                archiveNode.getDisplayName(), files.size()));
+            logger.info("Archive scan complete: {} files in {}", files.size(), archivePath);
+        });
+
+        task.setOnFailed(ev -> {
+            Throwable ex = task.getException();
+            logger.error("Archive scan failed", ex);
+            progressBar.setVisible(false);
+            progressBar.setManaged(false);
+            statusLabel.setText("Archive scan failed: " + (ex != null ? ex.getMessage() : "unknown error"));
+        });
+
+        new Thread(task, "archive-scan-thread").start();
     }
 
     private TreeItem<DirectoryNode> createIntermediatePath(Map<Path, TreeItem<DirectoryNode>> pathToItem,
@@ -1794,10 +2168,15 @@ public class MainController {
 
     @FXML
     private void onListView() {
+        MediaFile selected = getSelectedFile();
         thumbnailViewActive = false;
         mediaTable.setVisible(true);
         thumbnailScrollPane.setVisible(false);
         mediaTable.setItems(currentDisplayedFiles);
+        if (selected != null) {
+            mediaTable.getSelectionModel().select(selected);
+            mediaTable.scrollTo(selected);
+        }
         settings.setThumbnailView(false);
         configRepository.setOrganizeSettings(settings);
         statusLabel.setText("Switched to List View");
@@ -1806,14 +2185,23 @@ public class MainController {
 
     @FXML
     private void onThumbnailView() {
+        MediaFile selected = getSelectedFile();
         thumbnailViewActive = true;
         mediaTable.setVisible(false);
         thumbnailScrollPane.setVisible(true);
-        loadThumbnails();
+        loadThumbnails(selected);
         settings.setThumbnailView(true);
         configRepository.setOrganizeSettings(settings);
         statusLabel.setText("Switched to Thumbnail View");
         logger.debug("Switched to Thumbnail View");
+    }
+
+    @FXML
+    private void onToggleShowArchives() {
+        boolean show = showArchivesMenuItem.isSelected();
+        settings.setShowArchivesInTree(show);
+        configRepository.setOrganizeSettings(settings);
+        buildDirectoryTree();
     }
 
     @FXML
@@ -1903,6 +2291,66 @@ public class MainController {
         }
     }
 
+    private MediaFile getSelectedFile() {
+        if (thumbnailViewActive) {
+            // In thumbnail view, selection is tracked via the field
+            return selectedThumbnailFile;
+        }
+        return mediaTable.getSelectionModel().getSelectedItem();
+    }
+
+    private void scrollThumbnailToFile(MediaFile target) {
+        if (target == null) return;
+        for (var node : thumbnailPane.getChildren()) {
+            if (!(node instanceof javafx.scene.layout.VBox card)) continue;
+            if (card.getUserData() == target) {
+                thumbnailScrollPane.layout();
+                double y = card.getBoundsInParent().getMinY();
+                double contentH = thumbnailPane.getBoundsInLocal().getHeight();
+                double vpH = thumbnailScrollPane.getViewportBounds().getHeight();
+                if (contentH > vpH) {
+                    thumbnailScrollPane.setVvalue(Math.min(1.0, y / (contentH - vpH)));
+                }
+                break;
+            }
+        }
+    }
+
+    private void selectThumbnailCard(MediaFile target) {
+        if (target == null) return;
+        selectedThumbnailFile = target;
+        for (var node : thumbnailPane.getChildren()) {
+            if (!(node instanceof javafx.scene.layout.VBox card)) continue;
+            if (!(card.getUserData() instanceof MediaFile mf)) continue;
+            applyThumbnailCardStyle(card, mf, mf == target, false);
+        }
+    }
+
+    private void applyThumbnailCardStyle(javafx.scene.layout.VBox card, MediaFile mf,
+                                          boolean selected, boolean hovered) {
+        boolean isDuplicate = mf != null && mf.getSha1Hash() != null
+            && !mf.getSha1Hash().isEmpty() && !mf.getSha1Hash().equals(NO_HASH_KEY)
+            && fileIndex.containsKey(mf.getSha1Hash())
+            && fileIndex.get(mf.getSha1Hash()).size() > 1;
+
+        if (selected) {
+            card.setStyle("-fx-padding: 10; -fx-background-color: #cce5ff;"
+                + " -fx-border-color: #0078d7; -fx-border-width: 2;"
+                + " -fx-border-radius: 5; -fx-background-radius: 5;");
+        } else if (hovered) {
+            card.setStyle("-fx-padding: 10; -fx-background-color: #f0f0f0;"
+                + " -fx-border-color: #0078d7; -fx-border-width: 2;"
+                + " -fx-border-radius: 5; -fx-background-radius: 5; -fx-cursor: hand;");
+        } else if (isDuplicate) {
+            card.setStyle("-fx-padding: 10; -fx-background-color: white;"
+                + " -fx-border-color: #e6b800; -fx-border-width: 2;"
+                + " -fx-border-radius: 5; -fx-background-radius: 5;");
+        } else {
+            card.setStyle("-fx-padding: 10; -fx-background-color: white;"
+                + " -fx-border-color: #ddd; -fx-border-radius: 5; -fx-background-radius: 5;");
+        }
+    }
+
     private void refreshCurrentView() {
         if (thumbnailViewActive) {
             loadThumbnails();
@@ -1912,7 +2360,12 @@ public class MainController {
     }
 
     private void loadThumbnails() {
+        loadThumbnails(selectedThumbnailFile);
+    }
+
+    private void loadThumbnails(MediaFile preserveSelection) {
         thumbnailPane.getChildren().clear();
+        selectedThumbnailFile = null;
 
         if (currentDisplayedFiles.isEmpty()) {
             Label emptyLabel = new Label("No files to display");
@@ -1928,13 +2381,17 @@ public class MainController {
             VBox thumbnailBox = createThumbnailCard(mediaFile, totalFiles, thumbnailsCompleted);
             thumbnailPane.getChildren().add(thumbnailBox);
         }
+
+        if (preserveSelection != null) {
+            selectThumbnailCard(preserveSelection);
+        }
     }
 
     private VBox createThumbnailCard(MediaFile mediaFile, int totalFiles, AtomicInteger thumbnailsCompleted) {
         VBox card = new VBox(5);
         card.setAlignment(Pos.CENTER);
-        card.setStyle("-fx-padding: 10; -fx-background-color: white; -fx-border-color: #ddd; -fx-border-radius: 5; -fx-background-radius: 5;");
         card.setPrefSize(180, 220);
+        applyThumbnailCardStyle(card, mediaFile, false, false);
 
         // Placeholder image view
         ImageView imageView = new ImageView();
@@ -1968,6 +2425,9 @@ public class MainController {
 
         card.getChildren().addAll(imageContainer, filenameLabel);
 
+        // Tag card so scrollThumbnailToFile can locate it
+        card.setUserData(mediaFile);
+
         // Load thumbnail asynchronously
         loadThumbnailAsync(mediaFile, imageView, loadingSpinner, totalFiles, thumbnailsCompleted);
 
@@ -1989,10 +2449,25 @@ public class MainController {
         MenuItem removeOtherDuplicatesItem = new MenuItem("Remove Other Duplicates");
         removeOtherDuplicatesItem.setOnAction(e -> removeOtherDuplicates(mediaFile));
 
-        // Enable/disable "Remove Other Duplicates" based on whether file has duplicates
+        MenuItem deleteFileThumbItem = new MenuItem("Delete File");
+        deleteFileThumbItem.setOnAction(e -> deleteFile(mediaFile));
+
+        MenuItem restoreFromBinThumbItem = new MenuItem("Restore to Original Location");
+        restoreFromBinThumbItem.setOnAction(e -> restoreFromBin(mediaFile));
+
+        MenuItem enhanceWithAiItem = new MenuItem("Enhance with AI...");
+        enhanceWithAiItem.setOnAction(e -> openEnhancementDialog(mediaFile));
+
+        // Enable/disable based on context
         contextMenu.setOnShowing(event -> {
             boolean hasDupes = hasDuplicates(mediaFile);
             removeOtherDuplicatesItem.setDisable(!hasDupes);
+            enhanceWithAiItem.setDisable(imageEnhancementService.getConfiguredProviders().isEmpty()
+                || mediaFile.getType() != MediaType.IMAGE);
+            boolean hasBin = settings != null && settings.getRecycleBinFolder() != null;
+            deleteFileThumbItem.setDisable(!hasBin);
+            boolean isInBin = hasBin && recycleBinRepository.isInBin(mediaFile.getAbsolutePath());
+            restoreFromBinThumbItem.setVisible(isInBin);
         });
 
         contextMenu.getItems().addAll(
@@ -2002,25 +2477,61 @@ public class MainController {
             copyPathItem,
             copyFilenameItem,
             new SeparatorMenuItem(),
-            removeOtherDuplicatesItem
+            removeOtherDuplicatesItem,
+            deleteFileThumbItem,
+            restoreFromBinThumbItem,
+            new SeparatorMenuItem(),
+            enhanceWithAiItem
         );
 
         // Mouse event handlers
         card.setOnMouseClicked(event -> {
-            if (event.getButton() == javafx.scene.input.MouseButton.PRIMARY && event.getClickCount() == 2) {
-                // Double-click to open
-                openFile(mediaFile);
+            if (event.getButton() == javafx.scene.input.MouseButton.PRIMARY) {
+                selectThumbnailCard(mediaFile);
+                if (event.getClickCount() == 2) {
+                    openFile(mediaFile);
+                }
             } else if (event.getButton() == javafx.scene.input.MouseButton.SECONDARY) {
-                // Right-click to show context menu
+                selectThumbnailCard(mediaFile);
                 contextMenu.show(card, event.getScreenX(), event.getScreenY());
             }
         });
 
-        // Hover effect
-        card.setOnMouseEntered(e -> card.setStyle("-fx-padding: 10; -fx-background-color: #f0f0f0; -fx-border-color: #0078d7; -fx-border-width: 2; -fx-border-radius: 5; -fx-background-radius: 5; -fx-cursor: hand;"));
-        card.setOnMouseExited(e -> card.setStyle("-fx-padding: 10; -fx-background-color: white; -fx-border-color: #ddd; -fx-border-radius: 5; -fx-background-radius: 5;"));
+        // Hover effect + tooltip
+        Tooltip thumbTooltip = buildThumbnailTooltip(mediaFile);
+        Tooltip.install(card, thumbTooltip);
+        card.setOnMouseEntered(e -> {
+            if (selectedThumbnailFile != mediaFile)
+                applyThumbnailCardStyle(card, mediaFile, false, true);
+        });
+        card.setOnMouseExited(e -> {
+            if (selectedThumbnailFile != mediaFile)
+                applyThumbnailCardStyle(card, mediaFile, false, false);
+        });
 
         return card;
+    }
+
+    private Tooltip buildThumbnailTooltip(MediaFile mediaFile) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(mediaFile.getFilename());
+        if (mediaFile.getResolution() != null) {
+            sb.append("\n").append(mediaFile.getResolution().width)
+              .append(" × ").append(mediaFile.getResolution().height);
+        }
+        if (mediaFile.getDateTaken() != null) {
+            sb.append("\n").append(com.albumorganizer.util.FormatUtils.formatDateTaken(
+                mediaFile.getDateTaken(), mediaFile.isDateEstimated()));
+        }
+        sb.append("\n").append(com.albumorganizer.util.FormatUtils.formatSize(mediaFile.getSizeBytes()));
+        // Show original path if this file is in the recycle bin
+        Path originalPath = recycleBinRepository.getOriginalPath(mediaFile.getAbsolutePath());
+        if (originalPath != null) {
+            sb.append("\nOriginal: ").append(originalPath);
+        }
+        Tooltip tt = new Tooltip(sb.toString());
+        tt.setShowDelay(javafx.util.Duration.millis(400));
+        return tt;
     }
 
     private void loadThumbnailAsync(MediaFile mediaFile, ImageView imageView, ProgressIndicator loadingSpinner,
@@ -2029,15 +2540,43 @@ public class MainController {
             @Override
             protected Image call() throws Exception {
                 try {
+                    // Archive entry: extract bytes and generate thumbnail in-memory
+                    if (com.albumorganizer.service.ArchiveScanService.isArchiveEntry(mediaFile.getAbsolutePath())) {
+                        String[] parts = com.albumorganizer.service.ArchiveScanService
+                            .splitArchivePath(mediaFile.getAbsolutePath());
+                        if (parts != null) {
+                            byte[] bytes = archiveScanService.extractEntry(
+                                java.nio.file.Paths.get(parts[0]), parts[1]);
+                            if (bytes != null) {
+                                String cacheKey = com.albumorganizer.service.ThumbnailService
+                                    .archiveEntryCacheKey(parts[0], parts[1]);
+                                return thumbnailService.generateThumbnailFromBytes(bytes, cacheKey);
+                            }
+                        }
+                        return null;
+                    }
                     if (thumbnailService.needsSpecialHandling(mediaFile.getAbsolutePath(), mediaFile.getType())) {
                         Image thumbnail = thumbnailService.generateThumbnail(
                                 mediaFile.getAbsolutePath(), mediaFile.getType());
                         if (thumbnail != null) {
                             return thumbnail;
                         }
+                        // Video returned null — check if audio-only to show correct placeholder
+                        if (mediaFile.getType() == MediaType.VIDEO
+                                && thumbnailService.isAudioOnly(mediaFile.getAbsolutePath())) {
+                            return AUDIO_ONLY_SENTINEL;
+                        }
+                        return null;
                     }
+                    // Try loading directly via JavaFX; fall back to sips if it fails (e.g. wrong extension)
                     String fileUri = mediaFile.getAbsolutePath().toUri().toString();
-                    return new Image(fileUri, 160, 160, true, true, true);
+                    Image direct = new Image(fileUri, 160, 160, true, true, true);
+                    if (!direct.isError() && direct.getWidth() > 0) {
+                        return direct;
+                    }
+                    // Fallback: convert via sips (handles wrong-extension files like WebP named .jpg)
+                    return thumbnailService.generateThumbnail(
+                            mediaFile.getAbsolutePath(), mediaFile.getType());
                 } catch (Exception e) {
                     logger.warn("Failed to load thumbnail for: {}", mediaFile.getFilename(), e);
                     return null;
@@ -2047,22 +2586,26 @@ public class MainController {
 
         loadTask.setOnSucceeded(event -> {
             Image image = loadTask.getValue();
-            if (image != null) {
-                Platform.runLater(() -> {
+            Platform.runLater(() -> {
+                loadingSpinner.setVisible(false);
+                if (image == AUDIO_ONLY_SENTINEL) {
+                    Label audioLabel = new Label("🎵");
+                    audioLabel.setStyle("-fx-font-size: 48px;");
+                    imageView.setImage(null);
+                    StackPane parent = (StackPane) imageView.getParent();
+                    if (parent != null && !parent.getChildren().contains(audioLabel)) {
+                        parent.getChildren().add(audioLabel);
+                    }
+                } else if (image != null) {
                     imageView.setImage(image);
                     applyOrientationRotation(imageView, mediaFile.getOrientation());
-                    loadingSpinner.setVisible(false);
-                    onThumbnailCompleted(totalFiles, thumbnailsCompleted);
-                });
-            } else {
-                Platform.runLater(() -> {
+                } else {
                     Label errorLabel = new Label("?");
                     errorLabel.setStyle("-fx-font-size: 48px; -fx-text-fill: #999;");
                     imageView.setImage(null);
-                    loadingSpinner.setVisible(false);
-                    onThumbnailCompleted(totalFiles, thumbnailsCompleted);
-                });
-            }
+                }
+                onThumbnailCompleted(totalFiles, thumbnailsCompleted);
+            });
         });
 
         thumbnailLoadExecutor.submit(loadTask);
@@ -2083,7 +2626,12 @@ public class MainController {
 
     private void applyOrientationRotation(ImageView imageView, int orientation) {
         switch (orientation) {
-            case 3: imageView.setRotate(180); break;   // EXIF upside down
+            case 2:                                     // EXIF mirror horizontal (no rotation for display)
+                break;
+            case 3:                                     // EXIF upside down
+            case 4:                                     // EXIF mirror + 180° — display as 180°
+                imageView.setRotate(180);
+                break;
             case 5:                                     // EXIF transposed (mirror + 90 CW)
             case 6:                                     // EXIF rotated 90 CW
                 imageView.setRotate(90);
@@ -2160,10 +2708,16 @@ public class MainController {
     }
 
     /**
-     * Removes all other duplicate files (keeps the selected one, moves others to trash).
+     * Removes all other duplicate files (keeps the selected one, moves others to recycle bin).
      */
     private void removeOtherDuplicates(MediaFile keepFile) {
         if (keepFile == null || keepFile.getSha1Hash() == null) {
+            return;
+        }
+
+        if (settings.getRecycleBinFolder() == null) {
+            showWarning("Recycle-Bin Not Configured",
+                "Please configure a Recycle-Bin folder first via File > Add Recycle-Bin Folder.");
             return;
         }
 
@@ -2217,7 +2771,7 @@ public class MainController {
         content.getChildren().add(new Separator());
 
         // Label for files to delete
-        Label deleteLabel = new Label("Select files to MOVE TO TRASH (uncheck to keep):");
+        Label deleteLabel = new Label("Select files to MOVE TO RECYCLE-BIN (uncheck to keep):");
         deleteLabel.setStyle("-fx-font-weight: bold;");
         content.getChildren().add(deleteLabel);
 
@@ -2253,7 +2807,7 @@ public class MainController {
         confirmAlert.getDialogPane().setPrefWidth(600 * fontScale);
 
         // Custom buttons: Cancel (default) and Delete
-        ButtonType deleteButtonType = new ButtonType("Delete", ButtonBar.ButtonData.OK_DONE);
+        ButtonType deleteButtonType = new ButtonType("Move to Recycle-Bin", ButtonBar.ButtonData.OK_DONE);
         ButtonType cancelButtonType = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
         confirmAlert.getButtonTypes().setAll(cancelButtonType, deleteButtonType);
 
@@ -2279,14 +2833,15 @@ public class MainController {
             return;
         }
 
-        // Move selected duplicates to trash
+        // Move selected duplicates to recycle bin
         int successCount = 0;
         int failCount = 0;
         List<String> failedFiles = new ArrayList<>();
         String hash = keepFile.getSha1Hash();
+        Path binFolder = settings.getRecycleBinFolder();
 
         for (Path duplicatePath : filesToDelete) {
-            boolean success = FileTrashUtil.moveToTrash(duplicatePath);
+            boolean success = moveToBin(duplicatePath, binFolder);
             if (success) {
                 successCount++;
                 // Remove from fileIndex
@@ -2313,17 +2868,268 @@ public class MainController {
 
         // Show result
         if (failCount == 0) {
-            statusLabel.setText("Removed " + successCount + " duplicate file(s) to trash");
-            logger.info("Successfully removed {} duplicates of: {}", successCount, keepFile.getFilename());
+            statusLabel.setText("Moved " + successCount + " duplicate file(s) to recycle bin");
+            logger.info("Successfully moved {} duplicates of: {} to bin", successCount, keepFile.getFilename());
         } else {
             String message = String.format(
-                "Removed %d file(s) to trash.\n\nFailed to remove %d file(s):\n%s",
+                "Moved %d file(s) to recycle bin.\n\nFailed to move %d file(s):\n%s",
                 successCount,
                 failCount,
                 String.join("\n", failedFiles.stream().limit(10).collect(Collectors.toList()))
             );
             showWarning("Partial Success", message);
-            logger.warn("Removed {} duplicates, failed to remove {}", successCount, failCount);
+            logger.warn("Moved {} duplicates, failed to move {}", successCount, failCount);
+        }
+    }
+
+    /** Returns true if the subtree rooted at folderPath contains any file that has duplicates outside the subtree. */
+    private boolean subtreeHasExternalDuplicates(Path folderPath) {
+        for (Map.Entry<String, List<FileIndexEntry>> entry : fileIndex.entrySet()) {
+            if (entry.getKey().equals(NO_HASH_KEY)) continue;
+            List<FileIndexEntry> entries = entry.getValue();
+            if (entries.size() <= 1) continue;
+            boolean hasInside  = entries.stream().anyMatch(e -> e.getDirectory().startsWith(folderPath));
+            boolean hasOutside = entries.stream().anyMatch(e -> !e.getDirectory().startsWith(folderPath));
+            if (hasInside && hasOutside) return true;
+        }
+        return false;
+    }
+
+    private void removeOtherDuplicatesInSubtree(Path folderPath) {
+        Path binFolder = settings.getRecycleBinFolder();
+        if (binFolder == null) {
+            showWarning("Recycle-Bin Not Configured",
+                "Please configure a Recycle-Bin folder first via File > Add Recycle-Bin Folder.");
+            return;
+        }
+
+        // Collect: for each hash that has copies both inside and outside, gather the outside ones
+        Map<String, List<Path>> toRemoveByHash = new java.util.LinkedHashMap<>();
+        for (Map.Entry<String, List<FileIndexEntry>> entry : fileIndex.entrySet()) {
+            if (entry.getKey().equals(NO_HASH_KEY)) continue;
+            List<FileIndexEntry> entries = entry.getValue();
+            if (entries.size() <= 1) continue;
+            boolean hasInside = entries.stream().anyMatch(e -> e.getDirectory().startsWith(folderPath));
+            if (!hasInside) continue;
+            List<Path> outside = entries.stream()
+                .filter(e -> !e.getDirectory().startsWith(folderPath))
+                .map(FileIndexEntry::getAbsolutePath)
+                .collect(Collectors.toList());
+            if (!outside.isEmpty()) toRemoveByHash.put(entry.getKey(), outside);
+        }
+
+        int totalToRemove = toRemoveByHash.values().stream().mapToInt(List::size).sum();
+        if (totalToRemove == 0) {
+            showWarning("No External Duplicates",
+                "No duplicates outside this folder were found.");
+            return;
+        }
+
+        String folderName = folderPath.getFileName() != null ? folderPath.getFileName().toString() : folderPath.toString();
+        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+        confirm.setTitle("Remove Other Duplicates");
+        confirm.setHeaderText("Move external duplicates to Recycle-Bin?");
+        confirm.setContentText(String.format(
+            "Found %d file(s) with duplicates inside \"%s\".\n"
+            + "%d duplicate(s) outside the folder will be moved to the recycle bin.\n\n"
+            + "Files inside the folder are kept. Only external copies are removed.",
+            toRemoveByHash.size(), folderName, totalToRemove));
+        ButtonType goBtn = new ButtonType("Move to Recycle-Bin", ButtonBar.ButtonData.OK_DONE);
+        ButtonType cancelBtn = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
+        confirm.getButtonTypes().setAll(cancelBtn, goBtn);
+        ((Button) confirm.getDialogPane().lookupButton(cancelBtn)).setDefaultButton(true);
+        ((Button) confirm.getDialogPane().lookupButton(goBtn)).setDefaultButton(false);
+        Optional<ButtonType> result = confirm.showAndWait();
+        if (result.isEmpty() || result.get() != goBtn) return;
+
+        // Run the operation in the background
+        progressLogList.getItems().clear();
+        progressBar.progressProperty().unbind();
+        progressBar.setProgress(0);
+        progressBar.setVisible(true);
+        progressBar.setManaged(true);
+        progressPanel.setVisible(true);
+        progressPanel.setManaged(true);
+        showProgressPanelMenuItem.setSelected(true);
+        stopProgressButton.setDisable(true);
+
+        Task<int[]> task = new Task<>() {
+            @Override
+            protected int[] call() {
+                int moved = 0, failed = 0, skipped = 0;
+                int total = totalToRemove;
+                int processed = 0;
+                for (Map.Entry<String, List<Path>> entry : toRemoveByHash.entrySet()) {
+                    for (Path p : entry.getValue()) {
+                        if (isCancelled()) break;
+                        if (!Files.exists(p)) {
+                            skipped++;
+                        } else if (moveToBin(p, binFolder)) {
+                            moved++;
+                            final String name = p.getFileName().toString();
+                            final int m = moved;
+                            Platform.runLater(() -> logProgress("✓ Moved: " + name + " (" + m + " so far)"));
+                            // Remove from fileIndex on FX thread
+                            final String hash = entry.getKey();
+                            final Path removed = p;
+                            Platform.runLater(() -> {
+                                List<FileIndexEntry> idx = fileIndex.get(hash);
+                                if (idx != null) {
+                                    idx.removeIf(fe -> fe.getAbsolutePath().equals(removed));
+                                    if (idx.isEmpty()) fileIndex.remove(hash);
+                                }
+                                currentDisplayedFiles.removeIf(f -> f.getAbsolutePath().equals(removed));
+                            });
+                        } else {
+                            failed++;
+                            final String name = p.getFileName().toString();
+                            Platform.runLater(() -> logProgress("✗ Failed: " + name));
+                        }
+                        processed++;
+                        updateProgress(processed, total);
+                    }
+                    if (isCancelled()) break;
+                }
+                return new int[]{moved, failed, skipped};
+            }
+        };
+
+        progressBar.progressProperty().bind(task.progressProperty());
+
+        task.setOnSucceeded(ev -> {
+            int[] stats = task.getValue();
+            progressBar.progressProperty().unbind();
+            progressBar.setProgress(1.0);
+            stopProgressButton.setDisable(true);
+
+            // Refresh UI
+            refreshCurrentView();
+            updateFileCount(currentDisplayedFiles.size());
+            highlightDuplicates();
+            buildDirectoryTree();
+
+            String summary = String.format(
+                "Done — moved %d, failed %d, skipped %d (already gone)",
+                stats[0], stats[1], stats[2]);
+            logProgress(summary);
+            statusLabel.setText(summary);
+            logger.info("removeOtherDuplicatesInSubtree({}): {}", folderPath, summary);
+        });
+
+        task.setOnFailed(ev -> {
+            progressBar.progressProperty().unbind();
+            stopProgressButton.setDisable(true);
+            logProgress("Operation failed: " + task.getException().getMessage());
+            logger.error("removeOtherDuplicatesInSubtree failed", task.getException());
+        });
+
+        currentOrganizeTask = task;
+        stopProgressButton.setDisable(false);
+        logProgress("Starting: remove external duplicates for \"" + folderName + "\" (" + totalToRemove + " files)...");
+        new Thread(task, "remove-duplicates-subtree").start();
+    }
+
+    private void deleteFile(MediaFile mediaFile) {
+        if (mediaFile == null) return;
+
+        Path binFolder = settings.getRecycleBinFolder();
+        if (binFolder == null) {
+            showWarning("Recycle-Bin Not Configured",
+                "Please configure a Recycle-Bin folder first via File > Add Recycle-Bin Folder.");
+            return;
+        }
+
+        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+        confirm.setTitle("Delete File");
+        confirm.setHeaderText("Move file to Recycle-Bin?");
+        confirm.setContentText(mediaFile.getAbsolutePath().toString());
+        ButtonType moveBtn = new ButtonType("Move to Recycle-Bin", ButtonBar.ButtonData.OK_DONE);
+        ButtonType cancelBtn = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
+        confirm.getButtonTypes().setAll(cancelBtn, moveBtn);
+        Button cancelButton = (Button) confirm.getDialogPane().lookupButton(cancelBtn);
+        cancelButton.setDefaultButton(true);
+        ((Button) confirm.getDialogPane().lookupButton(moveBtn)).setDefaultButton(false);
+
+        Optional<ButtonType> result = confirm.showAndWait();
+        if (result.isEmpty() || result.get() != moveBtn) return;
+
+        Path filePath = mediaFile.getAbsolutePath();
+        if (moveToBin(filePath, binFolder)) {
+            // Remove from file index
+            if (mediaFile.getSha1Hash() != null) {
+                List<FileIndexEntry> entries = fileIndex.get(mediaFile.getSha1Hash());
+                if (entries != null) {
+                    entries.removeIf(e -> e.getAbsolutePath().equals(filePath));
+                    if (entries.isEmpty()) fileIndex.remove(mediaFile.getSha1Hash());
+                }
+            }
+            currentDisplayedFiles.remove(mediaFile);
+            refreshCurrentView();
+            updateFileCount(currentDisplayedFiles.size());
+            highlightDuplicates();
+            // Scan the bin folder so the new file appears in the tree and index
+            quickScanFolder(binFolder);
+            statusLabel.setText("Moved to recycle bin: " + filePath.getFileName());
+        } else {
+            showError("Move Failed", "Could not move file to recycle bin: " + filePath.getFileName());
+        }
+    }
+
+    private void restoreFromBin(MediaFile mediaFile) {
+        if (mediaFile == null) return;
+        Path binPath = mediaFile.getAbsolutePath();
+        Path binFolder = binPath.getParent();
+        Path originalPath = recycleBinRepository.getOriginalPath(binPath);
+        if (originalPath == null) {
+            showWarning("No Record", "No original path recorded for this file.");
+            return;
+        }
+        try {
+            Files.createDirectories(originalPath.getParent());
+            if (Files.exists(originalPath)) {
+                showWarning("File Exists", "A file already exists at the original location:\n" + originalPath);
+                return;
+            }
+            Files.move(binPath, originalPath);
+            recycleBinRepository.remove(binPath);
+            currentDisplayedFiles.remove(mediaFile);
+            refreshCurrentView();
+            updateFileCount(currentDisplayedFiles.size());
+            highlightDuplicates();
+            // Scan both the bin folder (to reflect removal) and the original folder (to reflect addition)
+            quickScanFolder(binFolder);
+            quickScanFolder(originalPath.getParent());
+            statusLabel.setText("Restored: " + originalPath.getFileName());
+            logger.info("Restored {} to {}", binPath, originalPath);
+        } catch (IOException e) {
+            logger.error("Failed to restore file from bin", e);
+            showError("Restore Failed", "Could not restore file: " + e.getMessage());
+        }
+    }
+
+    private boolean moveToBin(Path sourcePath, Path binFolder) {
+        try {
+            Files.createDirectories(binFolder);
+            String filename = sourcePath.getFileName().toString();
+            Path target = binFolder.resolve(filename);
+            // If a file with that name already exists in the bin, add a numeric suffix
+            if (Files.exists(target)) {
+                int dot = filename.lastIndexOf('.');
+                String base = dot >= 0 ? filename.substring(0, dot) : filename;
+                String ext  = dot >= 0 ? filename.substring(dot) : "";
+                int counter = 1;
+                do {
+                    target = binFolder.resolve(base + "_" + counter + ext);
+                    counter++;
+                } while (Files.exists(target));
+            }
+            Files.move(sourcePath, target);
+            recycleBinRepository.add(target, sourcePath);
+            logger.info("Moved {} to bin as {}", sourcePath, target);
+            return true;
+        } catch (IOException e) {
+            logger.error("Failed to move {} to bin", sourcePath, e);
+            return false;
         }
     }
 
