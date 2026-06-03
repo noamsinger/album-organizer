@@ -174,6 +174,7 @@ public class DirectoryNode {
     private int mediaFileCount;             // Direct files in this directory
     private int recursiveFileCount;         // Total files including subdirectories
     private boolean album;                  // Is this a base/album folder?
+    private boolean aiGenerated;            // Is this the AI-Generated special folder?
 }
 ```
 
@@ -188,8 +189,10 @@ Root (virtual)
 │       └── ...
 ├── Videos (album, bold)
 │   └── ...
-└── Target (album, bold, purple)
-    └── ...
+└── (special folders always last)
+    ├── AlbumTarget (purple, bold)
+    ├── AlbumAiGenerated (blue, bold)
+    └── AlbumRecycleBin (dark red, bold)
 ```
 
 ### Building Process
@@ -448,7 +451,7 @@ boolean isDuplicate = duplicates != null && duplicates.size() > 1;
 }
 ```
 
-### Saved as: `~/.album-organizer/cache.json.gz`
+### Saved as: `~/.config/album-organizer/cache.json.gz`
 - GZIP compressed (typical 10:1 compression)
 - 50,000 files: ~500 KB compressed
 

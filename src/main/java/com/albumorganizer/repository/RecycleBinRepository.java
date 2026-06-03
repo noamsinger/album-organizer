@@ -10,13 +10,13 @@ import java.util.*;
 
 /**
  * Persists the mapping of files in the recycle-bin folder to their original paths.
- * Backed by ~/.album-organizer/recycle-bin-index.json.
+ * Backed by ~/.config/album-organizer/recycle-bin-index.json.
  */
 public class RecycleBinRepository {
 
     private static final Logger logger = LoggerFactory.getLogger(RecycleBinRepository.class);
     private static final Path INDEX_FILE = Paths.get(
-        System.getProperty("user.home"), ".album-organizer", "recycle-bin-index.json");
+        System.getProperty("user.home"), ".config", "album-organizer", "recycle-bin-index.json");
 
     // bin absolute path -> original absolute path
     private final Map<String, String> index = new LinkedHashMap<>();

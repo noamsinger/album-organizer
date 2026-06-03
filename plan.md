@@ -6,13 +6,15 @@
 
 ## Current Status
 
-v1.4.0 — feature-complete for scanning, organizing, archive browsing, and AI enhancement.
+v1.5.0 — feature-complete for scanning, organizing, archive browsing, AI enhancement, special folders, clipboard enhancement, and first-run setup.
 
 ## Key Architectural Decisions
 
-- **INI file for all settings** (`~/.album-organizer/album-organizer-config.ini`) — portable, human-editable
-- **Single global snapshot cache** (`~/.album-organizer/cache.json.gz`) — compressed JSON, no per-directory cache files
+- **INI file for all settings** (`~/.config/album-organizer/album-organizer-config.ini`) — portable, human-editable; migrated from `~/.album-organizer/` on first run
+- **Single global snapshot cache** (`~/.config/album-organizer/cache.json.gz`) — compressed JSON, no per-directory cache files
+- **OS-appropriate paths** via `AppDirs` — logs/reports to `~/Library/Logs/` (Mac), thumbnails to `~/Library/Caches/` (Mac), with Windows and Linux equivalents
 - **JavaFX Task** for all background work — keeps UI thread responsive
 - **`#` separator** for archive virtual paths (`archive.zip#entry/name`)
 - **EnhancementRequest.outputDir** — providers are output-location-agnostic; output directory injected at call site
 - **All AI images converted to JPEG in-memory** before sending to any provider
+- **AI output always goes to AI-Generated special folder** — `aiOutputToTargetFolder` setting removed; `MainController` moves enhanced files to `aiGeneratedFolder` after any enhancement

@@ -24,7 +24,15 @@
       "WebFetch(domain:platform.stability.ai)",
       "WebFetch(domain:developers.openai.com)",
       "WebFetch(domain:openai.com)",
-      "Bash(curl *)"
+      "Bash(curl *)",
+      "Bash(mvn package *)",
+      "Bash(pkill -f \"Album Organizer\")",
+      "Bash(cp target/album-organizer-1.0.0.jar \"target/dist/Album Organizer.app/Contents/app/album-organizer-1.0.0.jar\")",
+      "Bash(\"target/dist/Album Organizer.app/Contents/MacOS/Album Organizer\")",
+      "Bash(log show *)",
+      "Bash(open \"target/dist/Album Organizer.app\")",
+      "Bash(xattr -dr com.apple.quarantine \"target/dist/Album Organizer.app\")",
+      "Bash(target/dist/Album Organizer.app/Contents/runtime/Contents/Home/bin/java *)"
     ]
   }
 }

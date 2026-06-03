@@ -11,10 +11,14 @@
     <!-- Top: Menu Bar -->
     <top>
         <MenuBar useSystemMenuBar="false" styleClass="menu-bar">
-            <Menu text="File">
+            <Menu text="File" onShowing="#onFileMenuShowing">
                 <MenuItem text="Add Album Folder" onAction="#onSelectFolders" fx:id="menuSelectFolders"/>
-                <MenuItem text="Add Target Folder" onAction="#onAddTargetFolder"/>
-                <MenuItem text="Add Recycle-Bin Folder" onAction="#onAddRecycleBinFolder"/>
+                <SeparatorMenuItem/>
+                <MenuItem text="Set Target Folder" onAction="#onAddTargetFolder"/>
+                <MenuItem text="Set AI-Generated Folder" onAction="#onSetAiGeneratedFolder"/>
+                <MenuItem text="Set Recycle-Bin Folder" onAction="#onAddRecycleBinFolder"/>
+                <SeparatorMenuItem/>
+                <MenuItem fx:id="menuEnhanceFromClipboard" text="AI-Enhance from Clipboard" onAction="#onEnhanceFromClipboard" disable="true"/>
                 <SeparatorMenuItem/>
                 <MenuItem text="Settings..." onAction="#onSettings"/>
                 <SeparatorMenuItem/>

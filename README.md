@@ -13,7 +13,7 @@ A cross-platform desktop application for scanning, organizing, and AI-enhancing 
     - Two-pass progress bar: file reading (0-100%) then thumbnail loading (0-100%)
     - Automatic video frame rotation using FFmpeg displaymatrix
     - HEIC support via macOS sips conversion
-    - LRU disk cache (42MB max) at `~/.album-organizer/thumbnails/`
+    - LRU disk cache (42MB max) at platform-standard cache dir (Mac: `~/Library/Caches/album-organizer/thumbnails/`)
 - **Smart Scanning**:
   - **Full Scan with Hash**: Complete recursive scan with SHA-1 hash calculation
     - Smart hash recalculation: only rehashes new, modified, or unhashed files
@@ -28,6 +28,11 @@ A cross-platform desktop application for scanning, organizing, and AI-enhancing 
   - Thumbnails generated for images inside archives
   - Double-click an archive entry to extract to a temp file and open it
   - Toggle archive visibility via `View > Show Archives in Tree`
+- **Special Folders** (always last in tree):
+  - **Target** (`~/AlbumTarget`, purple): destination for organized files
+  - **AI-Generated** (`~/AlbumAiGenerated`, blue): all AI-enhanced output
+  - **Recycle-Bin** (`~/AlbumRecycleBin`, dark red): deleted files staging area
+  - All three created automatically on startup; configurable via File menu
 - **Album Folder Management**:
   - Add multiple album folders to scan
   - Set one folder as target folder (marked in purple)
@@ -57,9 +62,10 @@ A cross-platform desktop application for scanning, organizing, and AI-enhancing 
   - **Cloud providers**: Stability AI, OpenAI DALL·E, Google Gemini, Grok xAI
   - **Local providers**: Stable Diffusion WebUI, ComfyUI, InvokeAI, Real-ESRGAN
   - All providers receive images as JPEG (converted in-memory)
-  - Output location configurable: next to original, or in `targetFolder/AI-Generated/`
+  - Enhanced output always saved to the AI-Generated special folder
+  - **AI-Enhance from Clipboard**: `File > AI-Enhance from Clipboard` enhances the current clipboard image (enabled only when clipboard has an image and a provider is configured)
+- **First-Run Setup**: on first launch with no albums configured, the app detects Pictures, Dropbox, Google Drive, OneDrive, and iCloud folders and offers to add them with a full scan
 - **Settings**:
-  - **General tab**: AI-generated file output location
   - **Organize tab**: copy/move mode, folder structure, resolution thresholds
   - **AI Enhancement tab**: per-provider API keys and URLs, with setup instructions
 - **Font Size Control**:
@@ -87,7 +93,7 @@ A cross-platform desktop application for scanning, organizing, and AI-enhancing 
 
 ```bash
 ./build.sh
-open "target/dist/Album Organizer.app"
+open "target/dist/AlbumOrganizer.app"
 ```
 
 ### Windows
@@ -129,26 +135,19 @@ Switch via the `View` menu:
 
 ### AI Enhancement
 
-1. Right-click a file → **Enhance with AI** (or select it and use the context menu)
+1. Right-click a file → **Enhance with AI** (or select it and use the context menu), or use `File > AI-Enhance from Clipboard` for clipboard images
 2. In the dialog:
    - Select one or more prompts using checkboxes (e.g., "Upscale & Sharpen", "Restore Old Photo")
    - Choose an AI provider from the dropdown
    - Set output dimensions (optional)
    - Click **Enhance**
-3. The enhanced file is saved and the folder view refreshes automatically
-
-**Output location** is controlled by `File > Settings > General`:
-- **Next to the original**: saves alongside the source file
-- **In target folder / AI-Generated**: saves to `targetFolder/AI-Generated/`
+3. The enhanced file is saved to the **AI-Generated** special folder (`~/AlbumAiGenerated`) and the folder view refreshes automatically
 
 **Setting up AI providers**: open `File > Settings > AI Enhancement` and follow the Instructions button for each provider.
 
 ### Settings
 
-`File > Settings...` has three tabs:
-
-**General**
-- AI-generated file location: next to original, or in target folder under `AI-Generated`
+`File > Settings...` has two tabs:
 
 **Organize**
 - Organize mode: Copy or Move (with integrity verification)
@@ -178,17 +177,18 @@ Collision handling: if a file already exists at the target, hashes are compared 
 
 ### Configuration Files
 
-`~/.album-organizer/album-organizer-config.ini`:
+`~/.config/album-organizer/album-organizer-config.ini`:
 
 ```ini
 [AlbumFolders]
 /Users/username/Pictures
 
 [Settings]
-targetFolder=/Users/username/Pictures
+targetFolder=/Users/username/AlbumTarget
+aiGeneratedFolder=/Users/username/AlbumAiGenerated
+recycleBinFolder=/Users/username/AlbumRecycleBin
 fontSizeFactor=0
 showArchivesInTree=true
-aiOutputToTargetFolder=false
 
 [Organize]
 mode=COPY
@@ -206,10 +206,15 @@ stabilityAiKey=
 ...
 ```
 
-### Cache Files
+### Cache and Log Locations
 
-- Snapshot: `~/.album-organizer/cache.json.gz` — compressed JSON, fast startup
-- Thumbnails: `~/.album-organizer/thumbnails/` — LRU, 42MB max
+| Item | macOS | Windows | Linux |
+|------|-------|---------|-------|
+| Config | `~/.config/album-organizer/` | `~/.config/album-organizer/` | `~/.config/album-organizer/` |
+| Snapshot cache | `~/.config/album-organizer/cache.json.gz` | same | same |
+| Thumbnails | `~/Library/Caches/album-organizer/thumbnails/` | `%LOCALAPPDATA%\album-organizer\thumbnails\` | `~/.cache/album-organizer/thumbnails/` |
+| Logs | `~/Library/Logs/album-organizer/` | `%APPDATA%\album-organizer\logs\` | `~/.local/share/album-organizer/logs/` |
+| Reports | `~/Library/Logs/album-organizer/reports/` | `%APPDATA%\album-organizer\reports\` | `~/.local/share/album-organizer/reports/` |
 
 ## Supported File Formats
 

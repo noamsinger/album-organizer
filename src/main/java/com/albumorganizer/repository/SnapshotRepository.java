@@ -29,7 +29,7 @@ public class SnapshotRepository {
 
     private static final Logger logger = LoggerFactory.getLogger(SnapshotRepository.class);
 
-    private static final String CONFIG_DIR = System.getProperty("user.home") + File.separator + ".album-organizer";
+    private static final String CONFIG_DIR = System.getProperty("user.home") + File.separator + ".config" + File.separator + "album-organizer";
     private static final String CACHE_FILE = CONFIG_DIR + File.separator + "cache.json.gz";
 
     private final Gson gson;

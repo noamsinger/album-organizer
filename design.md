@@ -88,13 +88,15 @@ com.albumorganizer/
 ├── task/
 │   └── ScanTask.java                # JavaFX Task wrapper for scanning
 │
-└── util/
-    ├── FileTypeDetector.java        # Extension-based type + archive detection
-    ├── Constants.java               # IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, ARCHIVE_EXTENSIONS
-    ├── DateUtils.java               # Date parsing/formatting
-    ├── FormatUtils.java             # Size/date formatting for UI
-    ├── ErrorDialog.java             # Standardized error dialogs
-    └── FileTrashUtil.java           # Cross-platform trash/recycle
+├── util/
+│   ├── FileTypeDetector.java        # Extension-based type + archive detection
+│   ├── Constants.java               # IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, ARCHIVE_EXTENSIONS
+│   ├── DateUtils.java               # Date parsing/formatting
+│   ├── FormatUtils.java             # Size/date formatting for UI
+│   ├── ErrorDialog.java             # Standardized error dialogs
+│   ├── FileTrashUtil.java           # Cross-platform trash/recycle
+│   ├── AppDirs.java                 # OS-aware paths (logs, cache, reports)
+│   └── LogDirPropertyDefiner.java   # Logback PropertyDefinerBase for log dir
 ```
 
 ## Data Models
@@ -127,7 +129,8 @@ public class DirectoryNode {
     private int mediaFileCount;
     private String archiveType;       // "ZIP", "RAR", or null for real directories
     private Path archivePath;         // Set when this node represents an archive file
-    
+    private boolean aiGenerated;      // True for the AI-Generated special folder node
+
     public boolean isArchiveNode() { return archiveType != null; }
 }
 ```
@@ -145,9 +148,10 @@ public class AlbumOrganizerSettings {
     private boolean splitMedRes;
     private int lowResThresholdPixels;
     private int hiResThresholdPixels;
-    // General
-    private Path targetFolder;
-    private boolean aiOutputToTargetFolder; // true = save to targetFolder/AI-Generated/
+    // Special folders (null = use defaults set by applyDefaultSpecialFolders)
+    private Path targetFolder;            // ~/AlbumTarget
+    private Path aiGeneratedFolder;       // ~/AlbumAiGenerated
+    private Path recycleBinFolder;        // ~/AlbumRecycleBin
     // UI state
     private int fontSizeFactor;
     private String lastSelectedFolder;
@@ -236,20 +240,14 @@ All providers receive images converted to JPEG via `ImageUtils.loadAsJpeg(Path)`
 
 ### Output Path Resolution
 
-`ImageEnhancementService.resolveOutputPath()` has two overloads:
+`ImageEnhancementService.resolveOutputPath()` produces the output path next to the input file:
 
 ```java
-// next to original
+// Pattern: {base}_AI-{providerSlug}-{epoch}.jpg
 static Path resolveOutputPath(Path inputPath, String providerName)
-
-// explicit output directory (creates dir if needed)
-static Path resolveOutputPath(Path inputPath, String providerName,
-                               boolean useTargetFolder, Path targetFolder) throws IOException
 ```
 
-Output filename pattern: `{base}_AI-{providerSlug}-{epoch}.jpg`
-
-When `aiOutputToTargetFolder` is enabled, output goes to `targetFolder/AI-Generated/{filename}`.
+`MainController` always moves the result to the AI-Generated special folder after enhancement succeeds.
 
 ### Error Handling
 
@@ -257,19 +255,20 @@ Cloud providers parse JSON error bodies to extract `error.message` or equivalent
 
 ## Configuration Persistence
 
-### INI File (`~/.album-organizer/album-organizer-config.ini`)
+### INI File (`~/.config/album-organizer/album-organizer-config.ini`)
 
 ```ini
 [AlbumFolders]
 /Users/username/Pictures
 
 [Settings]
-targetFolder=/Users/username/Pictures
+targetFolder=/Users/username/AlbumTarget
+aiGeneratedFolder=/Users/username/AlbumAiGenerated
+recycleBinFolder=/Users/username/AlbumRecycleBin
 fontSizeFactor=0
 lastSelectedFolder=/Users/username/Pictures/2024
 thumbnailView=false
 showArchivesInTree=true
-aiOutputToTargetFolder=false
 
 [Organize]
 mode=COPY
@@ -306,9 +305,21 @@ checkedPromptTitles=Upscale & Sharpen||Denoise
 
 Window position/size uses Java Preferences API.
 
+## OS-Appropriate Paths (`AppDirs`)
+
+| Resource | macOS | Windows | Linux |
+|----------|-------|---------|-------|
+| Logs | `~/Library/Logs/album-organizer/` | `%APPDATA%\album-organizer\logs\` | `~/.local/share/album-organizer/logs/` |
+| Reports | `~/Library/Logs/album-organizer/reports/` | `%APPDATA%\album-organizer\reports\` | `~/.local/share/album-organizer/reports/` |
+| Thumbnails | `~/Library/Caches/album-organizer/thumbnails/` | `%LOCALAPPDATA%\album-organizer\thumbnails\` | `~/.cache/album-organizer/thumbnails/` |
+
+`LogDirPropertyDefiner` (a Logback `PropertyDefinerBase`) resolves the log directory at startup before application code runs, so Logback can write to the correct OS path from the first log line.
+
+On first run, each migration point copies data from the old `~/.config/album-organizer/` (thumbnails, logs) or `~/.album-organizer/` (config) to the new path.
+
 ## Cache Architecture
 
-**Snapshot Cache** (`~/.album-organizer/cache.json.gz`):
+**Snapshot Cache** (`~/.config/album-organizer/cache.json.gz`):
 - Single global compressed JSON file
 - Stores hash → list of FileIndexEntry (directory, filename, lastModified)
 - Loaded on startup for instant duplicate detection

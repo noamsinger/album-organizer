@@ -57,31 +57,31 @@ sips -z 1024 1024   src/main/resources/app-icon.png --out "$ICONSET/icon_512x512
 iconutil -c icns "$ICONSET" -o target/app-icon.icns
 
 # Always rebuild app bundle
-APP_BUNDLE="target/dist/Album Organizer.app"
+APP_BUNDLE="target/dist/AlbumOrganizer.app"
 echo "Building macOS app bundle..."
 rm -rf "target/dist"
 cp target/album-organizer-1.0.0.jar target/lib/
 jpackage \
     --type app-image \
-    --name "Album Organizer" \
-    --app-version "1.1.0" \
+    --name "AlbumOrganizer" \
+    --app-version "1.5.0" \
     --input target/lib \
     --main-jar album-organizer-1.0.0.jar \
     --main-class com.albumorganizer.AlbumOrganizerApp \
     --icon target/app-icon.icns \
     --dest target/dist \
     --java-options "-Dfile.encoding=UTF-8" \
-    --java-options "-Dapple.awt.application.name=Album\\ Organizer" \
+    --java-options "-Dapple.awt.application.name=AlbumOrganizer" \
     --java-options "--add-modules=javafx.controls,javafx.fxml,javafx.swing"
 rm target/lib/album-organizer-1.0.0.jar
 
 # Always rebuild DMG installer
-DMG_FILE="target/dist/Album Organizer-1.1.0.dmg"
+DMG_FILE="target/dist/AlbumOrganizer-1.5.0.dmg"
 echo "Building macOS installer (.dmg)..."
 jpackage \
     --type dmg \
-    --name "Album Organizer" \
-    --app-version "1.1.0" \
+    --name "AlbumOrganizer" \
+    --app-version "1.5.0" \
     --app-image "$APP_BUNDLE" \
     --icon target/app-icon.icns \
     --dest target/dist

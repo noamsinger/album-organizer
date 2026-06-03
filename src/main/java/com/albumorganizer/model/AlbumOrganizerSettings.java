@@ -24,7 +24,7 @@ public class AlbumOrganizerSettings {
     private String lastSelectedFolder; // Last selected folder path (for session restore)
     private boolean thumbnailView; // True if thumbnail view was active
     private boolean showArchivesInTree; // True if archive nodes should appear in tree
-    private boolean aiOutputToTargetFolder; // True = save AI files in targetFolder/AI-Generated/
+    private Path aiGeneratedFolder; // Standalone AI-Generated output folder
     private Path recycleBinFolder; // Folder that acts as recycle bin (null = not configured)
 
     public AlbumOrganizerSettings() {
@@ -42,7 +42,7 @@ public class AlbumOrganizerSettings {
         this.lastSelectedFolder = null;
         this.thumbnailView = false;
         this.showArchivesInTree = true;
-        this.aiOutputToTargetFolder = false;
+        this.aiGeneratedFolder = null;
         this.recycleBinFolder = null;
     }
 
@@ -150,12 +150,12 @@ public class AlbumOrganizerSettings {
         this.showArchivesInTree = showArchivesInTree;
     }
 
-    public boolean isAiOutputToTargetFolder() {
-        return aiOutputToTargetFolder;
+    public Path getAiGeneratedFolder() {
+        return aiGeneratedFolder;
     }
 
-    public void setAiOutputToTargetFolder(boolean aiOutputToTargetFolder) {
-        this.aiOutputToTargetFolder = aiOutputToTargetFolder;
+    public void setAiGeneratedFolder(Path aiGeneratedFolder) {
+        this.aiGeneratedFolder = aiGeneratedFolder;
     }
 
     public Path getRecycleBinFolder() {

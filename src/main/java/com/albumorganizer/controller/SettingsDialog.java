@@ -27,10 +27,6 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
     private final TextField lowResPixelsField;
     private final TextField hiResPixelsField;
 
-    // General fields
-    private final RadioButton aiOutputNextToOriginalRadio;
-    private final RadioButton aiOutputToTargetFolderRadio;
-
     // Cloud image AI fields
     private final CheckBox stabilityEnabledCheck;
     private final PasswordField stabilityKeyField;
@@ -57,28 +53,6 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
 
         ButtonType saveButtonType = new ButtonType("Save", ButtonBar.ButtonData.OK_DONE);
         getDialogPane().getButtonTypes().addAll(saveButtonType, ButtonType.CANCEL);
-
-        // ── General tab ───────────────────────────────────────────────────────
-        GridPane generalGrid = new GridPane();
-        generalGrid.setHgap(10);
-        generalGrid.setVgap(10);
-        generalGrid.setPadding(new Insets(20, 20, 10, 10));
-        int gRow = 0;
-
-        Label aiOutputLabel = new Label("AI-generated file location:");
-        aiOutputLabel.setStyle("-fx-font-weight: bold;");
-        generalGrid.add(aiOutputLabel, 0, gRow, 2, 1); gRow++;
-
-        ToggleGroup aiOutputGroup = new ToggleGroup();
-        aiOutputNextToOriginalRadio = new RadioButton("Next to the original file");
-        aiOutputNextToOriginalRadio.setToggleGroup(aiOutputGroup);
-        aiOutputNextToOriginalRadio.setSelected(!currentSettings.isAiOutputToTargetFolder());
-        generalGrid.add(aiOutputNextToOriginalRadio, 0, gRow, 2, 1); gRow++;
-
-        aiOutputToTargetFolderRadio = new RadioButton("In the target folder under 'AI-Generated'");
-        aiOutputToTargetFolderRadio.setToggleGroup(aiOutputGroup);
-        aiOutputToTargetFolderRadio.setSelected(currentSettings.isAiOutputToTargetFolder());
-        generalGrid.add(aiOutputToTargetFolderRadio, 0, gRow, 2, 1);
 
         // ── Organize tab ──────────────────────────────────────────────────────
         GridPane organizeGrid = new GridPane();
@@ -290,7 +264,7 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
 
         localGrid.add(sectionHeading("Real-ESRGAN (no prompt)",
             "How do I download the Real-ESRGAN ONNX model file for use with Java ONNX Runtime on a Mac? " +
-            "Give me the exact shell commands to: create the directory ~/.album-organizer/models/, " +
+            "Give me the exact shell commands to: create the directory ~/.config/album-organizer/models/, " +
             "download RealESRGAN_x4plus.onnx from the official GitHub release at " +
             "https://github.com/xinntao/Real-ESRGAN using curl or wget, " +
             "and verify the file downloaded correctly by checking its size. " +
@@ -302,7 +276,7 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
         localGrid.add(new Label("Model path:"), 0, lRow);
         realEsrganPathField = new TextField(currentEnhancement.realEsrganModelPath());
         realEsrganPathField.setPrefWidth(300);
-        realEsrganPathField.setPromptText("~/.album-organizer/models/RealESRGAN_x4plus.onnx");
+        realEsrganPathField.setPromptText("~/.config/album-organizer/models/RealESRGAN_x4plus.onnx");
         localGrid.add(realEsrganPathField, 1, lRow);
         bindToCheck(realEsrganEnabledCheck, realEsrganPathField);
 
@@ -324,7 +298,6 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
         TabPane tabPane = new TabPane();
         tabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
         tabPane.getTabs().addAll(
-            new Tab("General", generalGrid),
             new Tab("Organize", organizeGrid),
             new Tab("AI Enhancement", aiTabPane)
         );
@@ -415,7 +388,6 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
             s.setLowResThresholdPixels(Integer.parseInt(lowResPixelsField.getText()));
             s.setHiResThresholdPixels(Integer.parseInt(hiResPixelsField.getText()));
         } catch (NumberFormatException ignored) {}
-        s.setAiOutputToTargetFolder(aiOutputToTargetFolderRadio.isSelected());
         return s;
     }
 

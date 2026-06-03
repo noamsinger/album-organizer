@@ -5,7 +5,33 @@ All notable changes to Album Organizer will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.4.0] - 2026-05-30
+## [1.5.0] - 2026-06-03
+
+### Added
+- **Special folders**: AI-Generated (`~/AlbumAiGenerated`) and Recycle-Bin (`~/AlbumRecycleBin`) are now independent special folders alongside Target (`~/AlbumTarget`), always shown last in the directory tree
+  - Target = purple, AI-Generated = blue, Recycle-Bin = dark red
+  - All three created on startup if they don't exist; configurable via File menu
+- **File > AI-Enhance from Clipboard**: new menu item that opens the enhancement dialog on the current clipboard image
+  - Enabled only when clipboard contains an image and at least one AI provider is configured
+  - Output saved as `Clipboard-{provider}-{epoch}.jpg` in the AI-Generated special folder
+- **First-run dialog**: when no albums are configured, the app detects and suggests local folders (Pictures, Dropbox, Google Drive, OneDrive, iCloud) and runs a full scan if approved
+- **`AppDirs` utility**: centralised OS-aware path resolution (Mac: `~/Library/…`; Windows: `%APPDATA%`/`%LOCALAPPDATA%`; Linux: `~/.local/share/…` / `~/.cache/…`)
+- **`LogDirPropertyDefiner`**: Logback `PropertyDefinerBase` that resolves the OS-appropriate log directory at startup before the application code runs
+
+### Changed
+- Config directory changed from `~/.album-organizer/` to `~/.config/album-organizer/`; existing config is migrated automatically on first run
+- Default special folder paths changed from `~/Target` / `~/AI-Generated` / `~/PictureRecycleBin` to `~/AlbumTarget` / `~/AlbumAiGenerated` / `~/AlbumRecycleBin`
+- Log files moved to OS-appropriate path (Mac: `~/Library/Logs/album-organizer/`; Windows: `%APPDATA%\album-organizer\logs\`; Linux: `~/.local/share/album-organizer/logs/`)
+- Thumbnail cache moved to OS-appropriate path (Mac: `~/Library/Caches/album-organizer/thumbnails/`; Windows: `%LOCALAPPDATA%\album-organizer\thumbnails\`; Linux: `~/.cache/album-organizer/thumbnails/`)
+- Organizing reports moved to OS-appropriate persistent path (Mac: `~/Library/Logs/album-organizer/reports/`; Windows/Linux: same base as logs)
+- AI-enhanced images always go to the AI-Generated special folder (the `aiOutputToTargetFolder` setting has been removed)
+- Settings dialog: removed "General" tab (AI output location toggle is no longer needed)
+
+### Removed
+- `aiOutputToTargetFolder` setting (field, INI key, and Settings UI); AI output always goes to the AI-Generated folder
+- Dead `ImageEnhancementService.resolveOutputPath(Path, String, boolean, Path)` overload
+
+
 
 ### Added
 - **Settings — General tab**: new first tab in the Settings dialog with AI output location option

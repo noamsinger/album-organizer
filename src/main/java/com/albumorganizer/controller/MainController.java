@@ -119,6 +119,7 @@ public class MainController {
     @FXML private Button viewReportButton;
     @FXML private Button stopProgressButton;
     @FXML private Button hideProgressButton;
+    @FXML private MenuItem menuEnhanceFromClipboard;
 
     private final ScannerService scannerService;
     private final DirectoryScanService directoryScanService;
@@ -187,6 +188,7 @@ public class MainController {
 
         // Load settings including font size and target folder FIRST
         settings = configRepository.getOrganizeSettings();
+        applyDefaultSpecialFolders();
         applyFontSize();
 
         // Load saved folders (needs settings to be initialized)
@@ -201,10 +203,21 @@ public class MainController {
         // Initialize with empty displayed files (will scan on selection)
         currentDisplayedFiles.clear();
 
-        // Run quick scan on startup for all album folders
+        // Run quick scan on startup for all album and special folders
         if (!baseFolders.isEmpty()) {
-            logger.debug("Running startup quick scan on {} album folders", baseFolders.size());
+            logger.info("Running startup quick scan on {} album folders", baseFolders.size());
             Platform.runLater(() -> startStartupQuickScan());
+        } else {
+            // Even with no album folders, still scan the special folders
+            boolean hasSpecialFolders = java.util.stream.Stream.of(
+                    settings.getTargetFolder(), settings.getAiGeneratedFolder(), settings.getRecycleBinFolder())
+                .anyMatch(p -> p != null && java.nio.file.Files.isDirectory(p));
+            if (hasSpecialFolders) {
+                logger.info("No album folders, but special folders exist — running startup quick scan");
+                Platform.runLater(() -> startStartupQuickScan());
+            } else {
+                Platform.runLater(() -> showFirstRunDialog());
+            }
         }
 
         // Restore view mode from settings
@@ -469,14 +482,17 @@ public class MainController {
             removeOtherDuplicatesItem.setDisable(!hasDuplicates);
 
             boolean hasBin = settings != null && settings.getRecycleBinFolder() != null;
-            deleteFileItem.setDisable(selected == null || !hasBin);
-
             boolean isInBin = selected != null && hasBin
-                && recycleBinRepository.isInBin(selected.getAbsolutePath());
+                && selected.getAbsolutePath().startsWith(settings.getRecycleBinFolder());
+            deleteFileItem.setDisable(selected == null || !hasBin || isInBin);
+
             restoreFromBinItem.setVisible(isInBin);
+            restoreFromBinItem.setDisable(selected == null || !recycleBinRepository.isInBin(selected.getAbsolutePath()));
 
             boolean hasTargetFolder = settings != null && settings.getTargetFolder() != null;
-            organizeFileItem.setDisable(!hasTargetFolder);
+            boolean isInTarget = selected != null && hasTargetFolder
+                && selected.getAbsolutePath().startsWith(settings.getTargetFolder());
+            organizeFileItem.setDisable(!hasTargetFolder || isInTarget);
 
             boolean hasProviders = !imageEnhancementService.getConfiguredProviders().isEmpty();
             enhanceWithAiItem.setDisable(selected == null || !hasProviders
@@ -591,7 +607,8 @@ public class MainController {
                 && selected.getValue().getPath().equals(settings.getTargetFolder());
             boolean isRecycleBin = selected != null && selected.getValue().isRecycleBin();
             boolean canOrganizeRecursively = selected != null && selected.getValue().getRecursiveFileCount() > 0
-                && settings.getTargetFolder() != null;
+                && settings.getTargetFolder() != null
+                && hasPath && !selected.getValue().getPath().startsWith(settings.getTargetFolder());
             boolean isArchive = selected != null && selected.getValue().isArchiveNode();
 
             // "Remove Other Duplicates": need bin configured and at least one external duplicate in subtree
@@ -706,9 +723,13 @@ public class MainController {
                     if (item.getPath() != null && item.getPath().equals(settings.getTargetFolder())) {
                         setStyle("-fx-font-weight: bold; -fx-text-fill: purple;");
                     }
-                    // Recycle-bin folder: red and bold
+                    // AI-Generated folder: blue and bold
+                    else if (item.isAiGenerated()) {
+                        setStyle("-fx-font-weight: bold; -fx-text-fill: blue;");
+                    }
+                    // Recycle-bin folder: dark red and bold
                     else if (item.isRecycleBin()) {
-                        setStyle("-fx-font-weight: bold; -fx-text-fill: red;");
+                        setStyle("-fx-font-weight: bold; -fx-text-fill: darkred;");
                     }
                     // Archive node: italic
                     else if (item.isArchiveNode()) {
@@ -1036,6 +1057,8 @@ public class MainController {
         dialog.showAndWait().ifPresent(result -> {
             AlbumOrganizerSettings newSettings = result.settings();
             newSettings.setTargetFolder(settings.getTargetFolder());
+            newSettings.setAiGeneratedFolder(settings.getAiGeneratedFolder());
+            newSettings.setRecycleBinFolder(settings.getRecycleBinFolder());
             newSettings.setFontSizeFactor(settings.getFontSizeFactor());
             newSettings.setShowArchivesInTree(settings.isShowArchivesInTree());
             settings = newSettings;
@@ -1058,11 +1081,8 @@ public class MainController {
             lastCheckedPromptTitles = new ArrayList<>(enhancementConfig.checkedPromptTitles());
         }
 
-        // Resolve output directory based on settings
-        Path outputDir = null;
-        if (settings.isAiOutputToTargetFolder() && settings.getTargetFolder() != null) {
-            outputDir = settings.getTargetFolder().resolve("AI-Generated");
-        }
+        // Always output to the AI-Generated folder
+        Path outputDir = settings.getAiGeneratedFolder();
 
         EnhancementDialog dialog = new EnhancementDialog(
             mediaFile,
@@ -1111,8 +1131,25 @@ public class MainController {
         dialog.initOwner(rootPane.getScene().getWindow());
         dialog.showAndWait().ifPresent(result -> {
             if (result.success()) {
-                statusLabel.setText("Enhanced image saved: " + result.outputPath().getFileName());
-                quickScanFolder(result.outputPath().getParent());
+                Path enhancedFile = result.outputPath();
+                Path aiGeneratedFolder = settings.getAiGeneratedFolder();
+                if (aiGeneratedFolder != null && !enhancedFile.getParent().equals(aiGeneratedFolder)) {
+                    Path dest = aiGeneratedFolder.resolve(enhancedFile.getFileName());
+                    try {
+                        java.nio.file.Files.createDirectories(aiGeneratedFolder);
+                        java.nio.file.Files.move(enhancedFile, dest, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                        statusLabel.setText("Enhanced image saved to AI-Generated: " + dest.getFileName());
+                        logger.info("Moved enhanced image {} -> {}", enhancedFile, dest);
+                        quickScanFolder(aiGeneratedFolder);
+                    } catch (java.io.IOException e) {
+                        logger.error("Failed to move enhanced image to AI-Generated folder", e);
+                        statusLabel.setText("Enhanced image saved: " + enhancedFile.getFileName());
+                        quickScanFolder(enhancedFile.getParent());
+                    }
+                } else {
+                    statusLabel.setText("Enhanced image saved: " + enhancedFile.getFileName());
+                    quickScanFolder(enhancedFile.getParent());
+                }
             } else {
                 ErrorDialog.show("Enhancement Failed", "Enhancement failed", result.errorMessage());
             }
@@ -1134,9 +1171,138 @@ public class MainController {
     }
 
     @FXML
+    private void onFileMenuShowing() {
+        javafx.scene.input.Clipboard cb = javafx.scene.input.Clipboard.getSystemClipboard();
+        boolean hasImage = cb.hasImage();
+        boolean hasProviders = !imageEnhancementService.getConfiguredProviders().isEmpty();
+        menuEnhanceFromClipboard.setDisable(!hasImage || !hasProviders);
+    }
+
+    @FXML
+    private void onEnhanceFromClipboard() {
+        javafx.scene.input.Clipboard cb = javafx.scene.input.Clipboard.getSystemClipboard();
+        javafx.scene.image.Image fxImage = cb.getImage();
+        if (fxImage == null) return;
+
+        // Write clipboard image to a temp file in the AI-Generated folder
+        Path aiDir = settings.getAiGeneratedFolder();
+        long epoch = System.currentTimeMillis() / 1000;
+        Path tempInput;
+        try {
+            java.nio.file.Files.createDirectories(aiDir);
+            tempInput = aiDir.resolve("Clipboard-" + epoch + "-input.jpg");
+            java.awt.image.BufferedImage awtImage = javafx.embed.swing.SwingFXUtils.fromFXImage(fxImage, null);
+            if (awtImage.getType() != java.awt.image.BufferedImage.TYPE_INT_RGB) {
+                java.awt.image.BufferedImage rgb = new java.awt.image.BufferedImage(
+                    awtImage.getWidth(), awtImage.getHeight(), java.awt.image.BufferedImage.TYPE_INT_RGB);
+                java.awt.Graphics2D g = rgb.createGraphics();
+                g.drawImage(awtImage, 0, 0, null);
+                g.dispose();
+                awtImage = rgb;
+            }
+            javax.imageio.ImageIO.write(awtImage, "jpg", tempInput.toFile());
+        } catch (java.io.IOException e) {
+            logger.error("Failed to save clipboard image to temp file", e);
+            showError("Clipboard Error", "Could not save clipboard image: " + e.getMessage());
+            return;
+        }
+
+        final Path tempInputFinal = tempInput;
+        final long epochFinal = epoch;
+
+        // Build a synthetic MediaFile for the clipboard image
+        com.albumorganizer.model.MediaFile clipMediaFile = new com.albumorganizer.model.MediaFile(
+            tempInput.getFileName().toString(),
+            tempInput,
+            java.time.Instant.now(),
+            com.albumorganizer.model.MediaType.IMAGE,
+            tempInput.toFile().length()
+        );
+
+        double fontScale = Math.pow(2.0, settings.getFontSizeFactor() / 4.0);
+        EnhancementConfig enhancementConfig = configRepository.getEnhancementConfig();
+        List<NamedPrompt> savedPrompts = ImageEnhancementService.seedPrompts(enhancementConfig.savedPrompts());
+        if (lastCheckedPromptTitles.isEmpty() && !enhancementConfig.checkedPromptTitles().isEmpty()) {
+            lastCheckedPromptTitles = new ArrayList<>(enhancementConfig.checkedPromptTitles());
+        }
+
+        EnhancementDialog dialog = new EnhancementDialog(
+            clipMediaFile,
+            imageEnhancementService.getConfiguredProviders(),
+            savedPrompts,
+            fontScale,
+            lastUsedProvider,
+            lastCheckedPromptTitles,
+            lastAdditionalPrompt,
+            updatedPrompts -> {
+                EnhancementConfig current = configRepository.getEnhancementConfig();
+                configRepository.setEnhancementConfig(new EnhancementConfig(
+                    current.stabilityAiEnabled(), current.stabilityAiKey(),
+                    current.openAiEnabled(), current.openAiKey(),
+                    current.geminiEnabled(), current.geminiKey(),
+                    current.grokEnabled(), current.grokKey(),
+                    current.sdLocalEnabled(), current.sdLocalUrl(),
+                    current.realEsrganEnabled(), current.realEsrganModelPath(),
+                    current.comfyUiEnabled(), current.comfyUiUrl(),
+                    current.invokeAiEnabled(), current.invokeAiUrl(),
+                    new ArrayList<>(updatedPrompts), lastCheckedPromptTitles));
+            },
+            provider -> lastUsedProvider = provider,
+            checkedTitles -> {
+                lastCheckedPromptTitles = new ArrayList<>(checkedTitles);
+                EnhancementConfig current = configRepository.getEnhancementConfig();
+                configRepository.setEnhancementConfig(new EnhancementConfig(
+                    current.stabilityAiEnabled(), current.stabilityAiKey(),
+                    current.openAiEnabled(), current.openAiKey(),
+                    current.geminiEnabled(), current.geminiKey(),
+                    current.grokEnabled(), current.grokKey(),
+                    current.sdLocalEnabled(), current.sdLocalUrl(),
+                    current.realEsrganEnabled(), current.realEsrganModelPath(),
+                    current.comfyUiEnabled(), current.comfyUiUrl(),
+                    current.invokeAiEnabled(), current.invokeAiUrl(),
+                    current.savedPrompts(), lastCheckedPromptTitles));
+            },
+            additionalPrompt -> lastAdditionalPrompt = additionalPrompt,
+            aiDir);
+        dialog.initOwner(rootPane.getScene().getWindow());
+        dialog.showAndWait().ifPresent(result -> {
+            // Clean up the temp input file
+            try { java.nio.file.Files.deleteIfExists(tempInputFinal); } catch (java.io.IOException ignored) {}
+
+            if (result.success()) {
+                Path enhancedFile = result.outputPath();
+                // Extract provider slug from the output filename (pattern: base_AI-{slug}-{epoch}.jpg)
+                String outName = enhancedFile.getFileName().toString();
+                String providerSlug = "AI";
+                java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("_AI-([^-]+(?:-[^-]+)*)-\\d+\\.jpg$")
+                    .matcher(outName);
+                if (m.find()) providerSlug = m.group(1);
+
+                String finalName = "Clipboard-" + providerSlug + "-" + epochFinal + ".jpg";
+                // Rename in-place within aiDir (file is already there from the dialog)
+                Path dest = enhancedFile.getParent().resolve(finalName);
+                try {
+                    java.nio.file.Files.move(enhancedFile, dest, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    statusLabel.setText("Clipboard enhanced: " + finalName);
+                    logger.info("Clipboard enhancement saved as {}", dest);
+                    quickScanFolder(dest.getParent());
+                } catch (java.io.IOException e) {
+                    logger.error("Failed to rename clipboard enhanced image", e);
+                    statusLabel.setText("Enhanced clipboard image saved: " + enhancedFile.getFileName());
+                    quickScanFolder(enhancedFile.getParent());
+                }
+            } else {
+                try { java.nio.file.Files.deleteIfExists(tempInputFinal); } catch (java.io.IOException ignored) {}
+                ErrorDialog.show("Enhancement Failed", "Enhancement failed", result.errorMessage());
+            }
+        });
+    }
+
+    @FXML
     private void onAddTargetFolder() {
         DirectoryChooser directoryChooser = new DirectoryChooser();
-        directoryChooser.setTitle("Add Target Folder");
+        directoryChooser.setTitle("Set Target Folder");
 
         Stage stage = (Stage) rootPane.getScene().getWindow();
         File selectedDirectory = directoryChooser.showDialog(stage);
@@ -1144,6 +1310,24 @@ public class MainController {
         if (selectedDirectory != null) {
             Path newPath = selectedDirectory.toPath();
             addAlbumFolder(newPath, true);
+        }
+    }
+
+    @FXML
+    private void onSetAiGeneratedFolder() {
+        DirectoryChooser directoryChooser = new DirectoryChooser();
+        directoryChooser.setTitle("Set AI-Generated Folder");
+
+        Stage stage = (Stage) rootPane.getScene().getWindow();
+        File selectedDirectory = directoryChooser.showDialog(stage);
+
+        if (selectedDirectory != null) {
+            Path newPath = selectedDirectory.toPath();
+            settings.setAiGeneratedFolder(newPath);
+            configRepository.setOrganizeSettings(settings);
+            buildDirectoryTree();
+            statusLabel.setText("AI-Generated folder set: " + newPath.getFileName());
+            logger.info("Set AI-Generated folder: {}", newPath);
         }
     }
 
@@ -1354,7 +1538,7 @@ public class MainController {
         }
         try {
             String content = decompressReport(lastOrganizeReportCompressed);
-            Path reportsDir = Path.of("/tmp", "album-organizer-reports");
+            Path reportsDir = com.albumorganizer.util.AppDirs.reportsDir();
             Files.createDirectories(reportsDir);
             String filename = "album-organizer." + lastOrganizeReportTimestamp + ".txt";
             Path reportFile = reportsDir.resolve(filename);
@@ -1620,12 +1804,46 @@ public class MainController {
             }
         }
 
-        // Sort root level album folders case-insensitively
+        // Sort root level album folders case-insensitively (before adding special folders)
         root.getChildren().sort((item1, item2) -> {
             String name1 = item1.getValue().getDisplayName();
             String name2 = item2.getValue().getDisplayName();
             return name1.compareToIgnoreCase(name2);
         });
+
+        // Add target folder as a special node at the bottom if configured
+        if (settings.getTargetFolder() != null) {
+            Path targetPath = settings.getTargetFolder();
+            // Only add if not already present as an album folder
+            boolean alreadyInAlbums = baseFolders.contains(targetPath);
+            if (!alreadyInAlbums) {
+                String targetName = targetPath.getFileName() != null ? targetPath.getFileName().toString() : targetPath.toString();
+                DirectoryNode targetNode = new DirectoryNode(targetPath, targetName, true);
+                TreeItem<DirectoryNode> targetItem = new TreeItem<>(targetNode);
+                targetItem.setExpanded(false);
+                buildSubtree(targetItem, targetPath);
+                root.getChildren().add(targetItem);
+                if (currentlySelectedPath != null && targetPath.equals(currentlySelectedPath)) {
+                    itemToSelect = targetItem;
+                }
+                if (firstAlbum == null) firstAlbum = targetItem;
+            }
+        }
+
+        // Add AI-Generated folder at the bottom if configured (always after album folders)
+        if (settings.getAiGeneratedFolder() != null) {
+            Path aiPath = settings.getAiGeneratedFolder();
+            String aiName = aiPath.getFileName() != null ? aiPath.getFileName().toString() : aiPath.toString();
+            DirectoryNode aiNode = new DirectoryNode(aiPath, aiName, true);
+            aiNode.setAiGenerated(true);
+            TreeItem<DirectoryNode> aiItem = new TreeItem<>(aiNode);
+            aiItem.setExpanded(false);
+            buildSubtree(aiItem, aiPath);
+            root.getChildren().add(aiItem);
+            if (currentlySelectedPath != null && aiPath.equals(currentlySelectedPath)) {
+                itemToSelect = aiItem;
+            }
+        }
 
         // Add recycle-bin folder at the bottom if configured
         if (settings.getRecycleBinFolder() != null) {
@@ -1643,6 +1861,7 @@ public class MainController {
         }
 
         directoryTree.setRoot(root);
+        directoryTree.setShowRoot(false);
 
         // If we didn't find the previously selected path yet, search in subtrees
         if (itemToSelect == null && currentlySelectedPath != null) {
@@ -1916,6 +2135,133 @@ public class MainController {
         errorCountLabel.setText(count + (count == 1 ? " error" : " errors"));
     }
 
+    private void showFirstRunDialog() {
+        // Detect which well-known photo folders exist on this machine
+        Path home = java.nio.file.Paths.get(System.getProperty("user.home"));
+        String os = System.getProperty("os.name", "").toLowerCase();
+
+        List<Path> candidates = new ArrayList<>();
+
+        // macOS
+        candidates.add(home.resolve("Pictures"));
+        // Windows
+        candidates.add(home.resolve("Pictures"));  // same name, different OS
+        // Linux
+        candidates.add(home.resolve("Pictures"));
+
+        // Cloud storage — common locations across platforms
+        // Dropbox
+        candidates.add(home.resolve("Dropbox"));
+        candidates.add(home.resolve("Dropbox (Personal)"));
+        // Google Drive (macOS)
+        candidates.add(home.resolve("Library/CloudStorage").resolve("GoogleDrive-" + System.getProperty("user.name")));
+        // Google Drive (generic mount points)
+        candidates.add(java.nio.file.Paths.get("/Volumes/GoogleDrive"));
+        // Google Drive via google-drive-ocamlfuse (Linux)
+        candidates.add(home.resolve("GoogleDrive"));
+        candidates.add(home.resolve("Google Drive"));
+        // OneDrive
+        candidates.add(home.resolve("OneDrive"));
+        candidates.add(home.resolve("OneDrive - Personal"));
+        // iCloud Drive (macOS)
+        candidates.add(home.resolve("Library/Mobile Documents/com~apple~CloudDocs"));
+
+        // Scan Google Drive with wildcard account prefix (macOS)
+        try {
+            Path cloudStorage = home.resolve("Library/CloudStorage");
+            if (java.nio.file.Files.isDirectory(cloudStorage)) {
+                try (java.util.stream.Stream<Path> entries = java.nio.file.Files.list(cloudStorage)) {
+                    entries.filter(p -> p.getFileName().toString().startsWith("GoogleDrive"))
+                           .forEach(candidates::add);
+                }
+            }
+        } catch (java.io.IOException ignored) {}
+
+        // Deduplicate and keep only existing directories
+        java.util.LinkedHashSet<Path> seen = new java.util.LinkedHashSet<>();
+        List<Path> found = new ArrayList<>();
+        for (Path p : candidates) {
+            Path normalized = p.normalize();
+            if (seen.add(normalized) && java.nio.file.Files.isDirectory(normalized)) {
+                found.add(normalized);
+            }
+        }
+
+        if (found.isEmpty()) {
+            return; // Nothing to suggest
+        }
+
+        // Build dialog
+        javafx.scene.control.Dialog<Boolean> dialog = new javafx.scene.control.Dialog<>();
+        dialog.initOwner(rootPane.getScene().getWindow());
+        dialog.setTitle("Welcome to Album Organizer");
+        dialog.setHeaderText("No albums configured yet.\nWould you like to add your photo folders?");
+
+        javafx.scene.layout.VBox content = new javafx.scene.layout.VBox(8);
+        content.setPadding(new javafx.geometry.Insets(10));
+        content.getChildren().add(new javafx.scene.control.Label("Detected folders:"));
+
+        List<javafx.scene.control.CheckBox> boxes = new ArrayList<>();
+        for (Path p : found) {
+            String label = p.toString().replace(home.toString(), "~");
+            javafx.scene.control.CheckBox cb = new javafx.scene.control.CheckBox(label);
+            cb.setSelected(true);
+            cb.setUserData(p);
+            boxes.add(cb);
+            content.getChildren().add(cb);
+        }
+
+        dialog.getDialogPane().setContent(content);
+        dialog.getDialogPane().getButtonTypes().addAll(
+            javafx.scene.control.ButtonType.OK,
+            javafx.scene.control.ButtonType.CANCEL);
+        dialog.setResultConverter(bt -> bt == javafx.scene.control.ButtonType.OK);
+
+        dialog.showAndWait().ifPresent(ok -> {
+            if (!ok) return;
+            for (javafx.scene.control.CheckBox cb : boxes) {
+                if (cb.isSelected()) {
+                    Path folder = (Path) cb.getUserData();
+                    if (!baseFolders.contains(folder)) {
+                        baseFolders.add(folder);
+                    }
+                }
+            }
+            if (!baseFolders.isEmpty()) {
+                configRepository.setBaseFolders(baseFolders);
+                buildDirectoryTree();
+                Platform.runLater(() -> startScan(new ArrayList<>(baseFolders), true));
+            }
+        });
+    }
+
+    private void applyDefaultSpecialFolders() {
+        Path home = java.nio.file.Paths.get(System.getProperty("user.home"));
+        boolean changed = false;
+        if (settings.getTargetFolder() == null) {
+            settings.setTargetFolder(home.resolve("AlbumTarget"));
+            changed = true;
+        }
+        if (settings.getAiGeneratedFolder() == null) {
+            settings.setAiGeneratedFolder(home.resolve("AlbumAiGenerated"));
+            changed = true;
+        }
+        if (settings.getRecycleBinFolder() == null) {
+            settings.setRecycleBinFolder(home.resolve("AlbumRecycleBin"));
+            changed = true;
+        }
+        if (changed) {
+            configRepository.setOrganizeSettings(settings);
+        }
+        for (Path p : new Path[]{settings.getTargetFolder(), settings.getAiGeneratedFolder(), settings.getRecycleBinFolder()}) {
+            try {
+                java.nio.file.Files.createDirectories(p);
+            } catch (java.io.IOException e) {
+                logger.warn("Could not create special folder: {}", p, e);
+            }
+        }
+    }
+
     private void loadBaseFolders() {
         baseFolders = configRepository.getBaseFolders();
         if (!baseFolders.isEmpty()) {
@@ -1958,21 +2304,27 @@ public class MainController {
     }
 
     /**
-     * Runs a quick scan on startup for all album folders.
+     * Runs a quick scan on startup for all album folders and special folders.
      */
     private void startStartupQuickScan() {
-        if (baseFolders.isEmpty()) {
+        List<Path> foldersToScan = new ArrayList<>(baseFolders);
+        for (Path p : new Path[]{settings.getTargetFolder(), settings.getAiGeneratedFolder(), settings.getRecycleBinFolder()}) {
+            if (p != null && java.nio.file.Files.isDirectory(p) && !foldersToScan.contains(p)) {
+                foldersToScan.add(p);
+            }
+        }
+        if (foldersToScan.isEmpty()) {
             return;
         }
 
-        logger.debug("Starting startup quick scan of {} album folders", baseFolders.size());
+        logger.info("Starting startup quick scan of {} folders", foldersToScan.size());
         statusLabel.setText("Running startup quick scan...");
 
         // Track which folders are being scanned
-        currentlyScannedFolders = new ArrayList<>(baseFolders);
+        currentlyScannedFolders = new ArrayList<>(foldersToScan);
 
         // Create scan task with current file index
-        currentScanTask = new ScanTask(scannerService, baseFolders, false, fileIndex); // false = quick scan
+        currentScanTask = new ScanTask(scannerService, foldersToScan, false, fileIndex); // false = quick scan
 
         // Show and configure scan panel
         showProgressPanel(false); // false = quick scan
@@ -2465,9 +2817,10 @@ public class MainController {
             enhanceWithAiItem.setDisable(imageEnhancementService.getConfiguredProviders().isEmpty()
                 || mediaFile.getType() != MediaType.IMAGE);
             boolean hasBin = settings != null && settings.getRecycleBinFolder() != null;
-            deleteFileThumbItem.setDisable(!hasBin);
-            boolean isInBin = hasBin && recycleBinRepository.isInBin(mediaFile.getAbsolutePath());
+            boolean isInBin = hasBin && mediaFile.getAbsolutePath().startsWith(settings.getRecycleBinFolder());
+            deleteFileThumbItem.setDisable(!hasBin || isInBin);
             restoreFromBinThumbItem.setVisible(isInBin);
+            restoreFromBinThumbItem.setDisable(!recycleBinRepository.isInBin(mediaFile.getAbsolutePath()));
         });
 
         contextMenu.getItems().addAll(
@@ -3055,18 +3408,19 @@ public class MainController {
 
         Path filePath = mediaFile.getAbsolutePath();
         if (moveToBin(filePath, binFolder)) {
-            // Remove from file index
-            if (mediaFile.getSha1Hash() != null) {
-                List<FileIndexEntry> entries = fileIndex.get(mediaFile.getSha1Hash());
-                if (entries != null) {
-                    entries.removeIf(e -> e.getAbsolutePath().equals(filePath));
-                    if (entries.isEmpty()) fileIndex.remove(mediaFile.getSha1Hash());
-                }
+            // Remove from file index (hashed and unhashed buckets)
+            String hash = mediaFile.getSha1Hash();
+            String key = (hash != null && !hash.isEmpty()) ? hash : NO_HASH_KEY;
+            List<FileIndexEntry> entries = fileIndex.get(key);
+            if (entries != null) {
+                entries.removeIf(e -> e.getAbsolutePath().equals(filePath));
+                if (entries.isEmpty()) fileIndex.remove(key);
             }
             currentDisplayedFiles.remove(mediaFile);
             refreshCurrentView();
             updateFileCount(currentDisplayedFiles.size());
             highlightDuplicates();
+            buildDirectoryTree();
             // Scan the bin folder so the new file appears in the tree and index
             quickScanFolder(binFolder);
             statusLabel.setText("Moved to recycle bin: " + filePath.getFileName());

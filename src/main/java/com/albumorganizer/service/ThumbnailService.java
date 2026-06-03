@@ -1,6 +1,7 @@
 package com.albumorganizer.service;
 
 import com.albumorganizer.model.MediaType;
+import com.albumorganizer.util.AppDirs;
 import javafx.embed.swing.SwingFXUtils;
 import javafx.scene.image.Image;
 import org.bytedeco.javacv.FFmpegFrameGrabber;
@@ -29,8 +30,7 @@ public class ThumbnailService {
 
     private static final int THUMBNAIL_SIZE = 160;
     private static final long MAX_CACHE_BYTES = 42L * 1024 * 1024;
-    private static final Path CACHE_DIR = Paths.get(
-            System.getProperty("user.home"), ".album-organizer", "thumbnails");
+    private static final Path CACHE_DIR = AppDirs.thumbnailsDir();
 
     private final LinkedHashMap<String, Path> lruOrder;
     private long currentCacheBytes;
@@ -39,10 +39,28 @@ public class ThumbnailService {
         this.lruOrder = new LinkedHashMap<>(64, 0.75f, true);
         this.currentCacheBytes = 0;
         try {
+            migrateOldThumbnailCache();
             Files.createDirectories(CACHE_DIR);
             loadExistingCache();
         } catch (IOException e) {
             logger.error("Failed to create thumbnail cache directory", e);
+        }
+    }
+
+    private void migrateOldThumbnailCache() {
+        Path oldDir = Paths.get(System.getProperty("user.home"), ".config", "album-organizer", "thumbnails");
+        if (!Files.isDirectory(oldDir) || oldDir.equals(CACHE_DIR)) return;
+        try {
+            Files.createDirectories(CACHE_DIR);
+            try (DirectoryStream<Path> stream = Files.newDirectoryStream(oldDir)) {
+                for (Path src : stream) {
+                    Path dest = CACHE_DIR.resolve(src.getFileName());
+                    if (!Files.exists(dest)) Files.copy(src, dest);
+                }
+            }
+            logger.info("Migrated thumbnail cache from {} to {}", oldDir, CACHE_DIR);
+        } catch (IOException e) {
+            logger.warn("Could not migrate thumbnail cache: {}", e.getMessage());
         }
     }
 

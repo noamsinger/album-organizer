@@ -23,7 +23,7 @@ public class ConfigRepository {
 
     private static final Logger logger = LoggerFactory.getLogger(ConfigRepository.class);
 
-    private static final String CONFIG_DIR = System.getProperty("user.home") + File.separator + ".album-organizer";
+    private static final String CONFIG_DIR = System.getProperty("user.home") + File.separator + ".config" + File.separator + "album-organizer";
     private static final String CONFIG_FILE = CONFIG_DIR + File.separator + "album-organizer-config.ini";
 
     private static final String LAST_SCAN_DATE_KEY = "lastScanDate";
@@ -39,7 +39,47 @@ public class ConfigRepository {
 
     public ConfigRepository() {
         this.prefs = Preferences.userNodeForPackage(ConfigRepository.class);
+        migrateOldConfigIfNeeded();
         ensureConfigDirectoryExists();
+    }
+
+    private void migrateOldConfigIfNeeded() {
+        Path newDir = Paths.get(CONFIG_DIR);
+        if (Files.exists(newDir)) return;
+        Path oldDir = Paths.get(System.getProperty("user.home"), ".album-organizer");
+        if (!Files.exists(oldDir)) return;
+        try {
+            Files.createDirectories(newDir);
+            try (java.util.stream.Stream<Path> entries = Files.list(oldDir)) {
+                for (Path src : (Iterable<Path>) entries::iterator) {
+                    Path dest = newDir.resolve(src.getFileName());
+                    if (!Files.exists(dest)) {
+                        if (Files.isDirectory(src)) {
+                            copyDirectoryRecursive(src, dest);
+                        } else {
+                            Files.copy(src, dest);
+                        }
+                    }
+                }
+            }
+            logger.info("Migrated config from {} to {}", oldDir, newDir);
+        } catch (IOException e) {
+            logger.warn("Could not migrate old config directory: {}", e.getMessage());
+        }
+    }
+
+    private void copyDirectoryRecursive(Path src, Path dest) throws IOException {
+        Files.createDirectories(dest);
+        try (java.util.stream.Stream<Path> entries = Files.list(src)) {
+            for (Path child : (Iterable<Path>) entries::iterator) {
+                Path target = dest.resolve(child.getFileName());
+                if (Files.isDirectory(child)) {
+                    copyDirectoryRecursive(child, target);
+                } else if (!Files.exists(target)) {
+                    Files.copy(child, target);
+                }
+            }
+        }
     }
 
     /**
@@ -366,8 +406,8 @@ public class ConfigRepository {
                 if (settingsSection.containsKey("showArchivesInTree")) {
                     settings.setShowArchivesInTree(Boolean.parseBoolean(settingsSection.get("showArchivesInTree")));
                 }
-                if (settingsSection.containsKey("aiOutputToTargetFolder")) {
-                    settings.setAiOutputToTargetFolder(Boolean.parseBoolean(settingsSection.get("aiOutputToTargetFolder")));
+                if (settingsSection.containsKey("aiGeneratedFolder")) {
+                    settings.setAiGeneratedFolder(Paths.get(settingsSection.get("aiGeneratedFolder")));
                 }
                 if (settingsSection.containsKey("recycleBinFolder")) {
                     settings.setRecycleBinFolder(Paths.get(settingsSection.get("recycleBinFolder")));
@@ -415,7 +455,11 @@ public class ConfigRepository {
         }
         settingsSection.put("thumbnailView", String.valueOf(settings.isThumbnailView()));
         settingsSection.put("showArchivesInTree", String.valueOf(settings.isShowArchivesInTree()));
-        settingsSection.put("aiOutputToTargetFolder", String.valueOf(settings.isAiOutputToTargetFolder()));
+        if (settings.getAiGeneratedFolder() != null) {
+            settingsSection.put("aiGeneratedFolder", settings.getAiGeneratedFolder().toString());
+        } else {
+            settingsSection.remove("aiGeneratedFolder");
+        }
         if (settings.getRecycleBinFolder() != null) {
             settingsSection.put("recycleBinFolder", settings.getRecycleBinFolder().toString());
         } else {

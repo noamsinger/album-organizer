@@ -19,7 +19,7 @@ public class RealEsrganProvider implements EnhancementProvider {
 
     private static final Logger logger = LoggerFactory.getLogger(RealEsrganProvider.class);
     private static final String DEFAULT_MODEL_DIR =
-        System.getProperty("user.home") + "/.album-organizer/models/";
+        System.getProperty("user.home") + "/.config/album-organizer/models/";
 
     private final String modelPath;
 

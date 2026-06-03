@@ -17,6 +17,7 @@ public class DirectoryNode {
     private int recursiveFileCount; // Total files in this directory and all subdirectories
     private boolean album; // True if this is a base/album folder
     private boolean recycleBin; // True if this is the recycle-bin folder
+    private boolean aiGenerated; // True if this is the AI-Generated folder
     private String archiveType; // "ZIP", "RAR", or null for regular directories
     private Path archivePath;   // Path to the archive file (non-null when archiveType != null)
 
@@ -115,6 +116,14 @@ public class DirectoryNode {
 
     public void setRecycleBin(boolean recycleBin) {
         this.recycleBin = recycleBin;
+    }
+
+    public boolean isAiGenerated() {
+        return aiGenerated;
+    }
+
+    public void setAiGenerated(boolean aiGenerated) {
+        this.aiGenerated = aiGenerated;
     }
 
     public boolean isArchiveNode() {

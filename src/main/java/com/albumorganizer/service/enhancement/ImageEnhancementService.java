@@ -4,8 +4,6 @@ import com.albumorganizer.repository.ConfigRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -100,26 +98,6 @@ public class ImageEnhancementService {
         long epoch = System.currentTimeMillis() / 1000;
         String candidate = String.format("%s_AI-%s-%d.jpg", base, providerSlug, epoch);
         return parent.resolve(candidate);
-    }
-
-    /**
-     * Resolves the output path respecting the AI output location preference.
-     * When useTargetFolder is true and targetFolder is non-null, saves to targetFolder/AI-Generated/.
-     */
-    public static Path resolveOutputPath(Path inputPath, String providerName,
-                                         boolean useTargetFolder, Path targetFolder) throws IOException {
-        if (!useTargetFolder || targetFolder == null) {
-            return resolveOutputPath(inputPath, providerName);
-        }
-        Path aiDir = targetFolder.resolve("AI-Generated");
-        Files.createDirectories(aiDir);
-        String filename = inputPath.getFileName().toString();
-        int dot = filename.lastIndexOf('.');
-        String base = dot >= 0 ? filename.substring(0, dot) : filename;
-        String providerSlug = providerName.replaceAll("[^a-zA-Z0-9_-]", "_");
-        long epoch = System.currentTimeMillis() / 1000;
-        String candidate = String.format("%s_AI-%s-%d.jpg", base, providerSlug, epoch);
-        return aiDir.resolve(candidate);
     }
 
     /** Overload kept for back-compat — uses "Unknown" as provider. */
