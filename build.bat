@@ -212,10 +212,20 @@ copy /Y target\album-organizer-1.0.0.jar target\lib\ >NUL
     --icon src\main\resources\app-icon.png ^
     --dest target\dist ^
     --win-console ^
-    --add-modules javafx.controls,javafx.fxml,javafx.swing,javafx.graphics,javafx.base ^
-    --jlink-options "--module-path target\lib" ^
     --java-options "-Dfile.encoding=UTF-8"
 if errorlevel 1 goto error
+
+:: Extract JavaFX native DLLs from the win-classified jars into the runtime bin
+echo Extracting JavaFX native DLLs into runtime...
+set "RT_BIN=target\dist\Album Organizer\runtime\bin"
+for %%J in (target\lib\javafx-*-win.jar) do (
+    powershell -NoProfile -Command ^
+        "Add-Type -AssemblyName System.IO.Compression.FileSystem;" ^
+        "$z=[System.IO.Compression.ZipFile]::OpenRead('%%J');" ^
+        "foreach($e in $z.Entries){if($e.Name -like '*.dll'){" ^
+        "[System.IO.Compression.ZipFileExtensions]::ExtractToFile($e,'!RT_BIN!\'+$e.Name,$true)}}" ^
+        "$z.Dispose()"
+)
 
 del /Q target\lib\album-organizer-1.0.0.jar >NUL 2>&1
 
