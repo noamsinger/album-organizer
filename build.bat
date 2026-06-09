@@ -213,6 +213,7 @@ copy /Y target\album-organizer-1.0.0.jar target\lib\ >NUL
     --dest target\dist ^
     --win-console ^
     --add-modules javafx.controls,javafx.fxml,javafx.swing,javafx.graphics,javafx.base ^
+    --jlink-options "--module-path target\lib" ^
     --java-options "-Dfile.encoding=UTF-8"
 if errorlevel 1 goto error
 
