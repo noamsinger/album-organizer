@@ -2,62 +2,156 @@
 set -e
 cd "$(dirname "$0")"
 
-# ── Prerequisites ────────────────────────────────────────────────────────────
-echo "Checking prerequisites..."
+# ── Colors ───────────────────────────────────────────────────────────────────
+GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
+ok()   { echo -e "${GREEN}✔ $1${NC}"; }
+warn() { echo -e "${YELLOW}⚠ $1${NC}"; }
+info() { echo -e "  $1"; }
 
-# Homebrew
-if ! command -v brew &>/dev/null; then
-    echo "Installing Homebrew..."
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-fi
-
-# Java 17+
-JAVA_VER=$(java -version 2>&1 | awk -F'"' '/version/{print $2}' | cut -d. -f1)
-if [ -z "$JAVA_VER" ] || [ "$JAVA_VER" -lt 17 ]; then
-    echo "Installing Java 21 (temurin)..."
-    brew install --cask temurin@21
-    # Reload JAVA_HOME for this session
-    export JAVA_HOME="$(/usr/libexec/java_home -v 21 2>/dev/null || /usr/libexec/java_home)"
-fi
-
-# Maven
-if ! command -v mvn &>/dev/null; then
-    echo "Installing Maven..."
-    brew install maven
-fi
-
-# jpackage is bundled with JDK 14+ — verify it's available
-if ! command -v jpackage &>/dev/null; then
-    echo "jpackage not found. Make sure JAVA_HOME points to a JDK 17+ installation."
-    echo "  brew install --cask temurin@21"
-    exit 1
-fi
-
-echo "Prerequisites OK (java $(java -version 2>&1 | awk -F'"' '/version/{print $2}'), mvn $(mvn -q --version 2>&1 | head -1 | awk '{print $3}'))"
+echo "══════════════════════════════════════════════════════"
+echo "  Album Organizer — macOS build"
+echo "══════════════════════════════════════════════════════"
+echo ""
+echo "Checking build prerequisites..."
 echo ""
 
-echo "Building..."
+# ── Homebrew ─────────────────────────────────────────────────────────────────
+if ! command -v brew &>/dev/null; then
+    warn "Homebrew not found — installing..."
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    # Add brew to PATH for Apple Silicon
+    if [ -f /opt/homebrew/bin/brew ]; then
+        eval "$(/opt/homebrew/bin/brew shellenv)"
+    fi
+else
+    ok "Homebrew $(brew --version | head -1 | awk '{print $2}')"
+fi
+
+# ── Java 21 (Temurin) ────────────────────────────────────────────────────────
+JAVA_VER=$(java -version 2>&1 | awk -F'"' '/version/{print $2}' | cut -d. -f1)
+if [ -z "$JAVA_VER" ] || [ "$JAVA_VER" -lt 17 ]; then
+    warn "Java 17+ not found — installing Temurin 21..."
+    brew install --cask temurin@21
+    export JAVA_HOME="$(/usr/libexec/java_home -v 21 2>/dev/null || /usr/libexec/java_home)"
+else
+    ok "Java $JAVA_VER ($(java -version 2>&1 | head -1))"
+fi
+
+# Ensure JAVA_HOME is set to a JDK (needed for jpackage)
+if [ -z "$JAVA_HOME" ]; then
+    export JAVA_HOME="$(/usr/libexec/java_home 2>/dev/null)"
+fi
+
+# ── Maven ────────────────────────────────────────────────────────────────────
+if ! command -v mvn &>/dev/null; then
+    warn "Maven not found — installing..."
+    brew install maven
+else
+    ok "Maven $(mvn --version 2>&1 | head -1 | awk '{print $3}')"
+fi
+
+# ── jpackage (bundled with JDK 14+) ─────────────────────────────────────────
+if ! command -v jpackage &>/dev/null; then
+    # Try to locate it under JAVA_HOME
+    JP="$JAVA_HOME/bin/jpackage"
+    if [ -x "$JP" ]; then
+        export PATH="$JAVA_HOME/bin:$PATH"
+        ok "jpackage (via JAVA_HOME)"
+    else
+        echo -e "${RED}✖ jpackage not found.${NC}"
+        info "Make sure JAVA_HOME points to a JDK 17+ installation."
+        info "  brew install --cask temurin@21"
+        exit 1
+    fi
+else
+    ok "jpackage"
+fi
+
+# ── sips + iconutil (built in to macOS) ─────────────────────────────────────
+if ! command -v sips &>/dev/null || ! command -v iconutil &>/dev/null; then
+    echo -e "${RED}✖ sips/iconutil not found.${NC} These are built into macOS — are you on macOS?"
+    exit 1
+else
+    ok "sips + iconutil (macOS built-in)"
+fi
+
+# ── Python 3 (optional — needed for ComfyUI, Stable Diffusion, InvokeAI) ────
+if ! command -v python3 &>/dev/null; then
+    warn "Python 3 not found — installing (needed to run local AI servers)..."
+    brew install python
+else
+    ok "Python $(python3 --version 2>&1 | awk '{print $2}') (optional: local AI servers)"
+fi
+
+# ── Git (optional — needed to clone local AI servers) ───────────────────────
+if ! command -v git &>/dev/null; then
+    warn "Git not found — installing (needed to clone local AI servers)..."
+    brew install git
+else
+    ok "Git $(git --version | awk '{print $3}') (optional: local AI servers)"
+fi
+
+# ── curl (usually present, needed by ComfyUI API + build) ───────────────────
+if ! command -v curl &>/dev/null; then
+    warn "curl not found — installing..."
+    brew install curl
+else
+    ok "curl $(curl --version | head -1 | awk '{print $2}')"
+fi
+
+echo ""
+echo "All build prerequisites satisfied."
+echo ""
+
+# ── Optional AI tool guidance ────────────────────────────────────────────────
+echo "── Optional: Local AI servers ───────────────────────────────────────────"
+echo "  The app supports several local AI providers. They are NOT required to"
+echo "  build or run — enable them individually in Settings → AI Enhancement."
+echo ""
+echo "  ComfyUI (image + video, localhost:8188):"
+info "  git clone https://github.com/comfyanonymous/ComfyUI && cd ComfyUI"
+info "  python3 -m venv venv && source venv/bin/activate"
+info "  pip install -r requirements.txt"
+info "  python main.py --listen"
+info "  # Video support: cd custom_nodes && git clone https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite"
+echo ""
+echo "  Stable Diffusion WebUI (image, localhost:7860):"
+info "  git clone https://github.com/AUTOMATIC1111/stable-diffusion-webui"
+info "  cd stable-diffusion-webui && ./webui.sh --api"
+echo ""
+echo "  InvokeAI (image, localhost:9090):"
+info "  pip install invokeai && invokeai-web"
+echo ""
+echo "  Real-ESRGAN (image upscale, no GPU needed):"
+info "  mkdir -p ~/.config/album-organizer/models"
+info "  curl -L -o ~/.config/album-organizer/models/RealESRGAN_x4plus.onnx \\"
+info "    https://github.com/xinntao/Real-ESRGAN/releases/latest/download/RealESRGAN_x4plus.onnx"
+echo "─────────────────────────────────────────────────────────────────────────"
+echo ""
+
+# ── Build ────────────────────────────────────────────────────────────────────
+echo "Building JAR..."
 mvn package -DskipTests -q
 
-# Always rebuild icon
 echo "Building icons..."
 ICONSET="target/app-icon.iconset"
 rm -rf "$ICONSET" target/app-icon.icns
 mkdir -p "$ICONSET"
-sips -z 16 16       src/main/resources/app-icon.png --out "$ICONSET/icon_16x16.png"      >/dev/null 2>&1
-sips -z 32 32       src/main/resources/app-icon.png --out "$ICONSET/icon_16x16@2x.png"   >/dev/null 2>&1
-sips -z 32 32       src/main/resources/app-icon.png --out "$ICONSET/icon_32x32.png"      >/dev/null 2>&1
-sips -z 64 64       src/main/resources/app-icon.png --out "$ICONSET/icon_32x32@2x.png"   >/dev/null 2>&1
-sips -z 128 128     src/main/resources/app-icon.png --out "$ICONSET/icon_128x128.png"    >/dev/null 2>&1
-sips -z 256 256     src/main/resources/app-icon.png --out "$ICONSET/icon_128x128@2x.png" >/dev/null 2>&1
-sips -z 256 256     src/main/resources/app-icon.png --out "$ICONSET/icon_256x256.png"    >/dev/null 2>&1
-sips -z 512 512     src/main/resources/app-icon.png --out "$ICONSET/icon_256x256@2x.png" >/dev/null 2>&1
-sips -z 512 512     src/main/resources/app-icon.png --out "$ICONSET/icon_512x512.png"    >/dev/null 2>&1
-sips -z 1024 1024   src/main/resources/app-icon.png --out "$ICONSET/icon_512x512@2x.png" >/dev/null 2>&1
+sips -z 16   16    src/main/resources/app-icon.png --out "$ICONSET/icon_16x16.png"      >/dev/null 2>&1
+sips -z 32   32    src/main/resources/app-icon.png --out "$ICONSET/icon_16x16@2x.png"   >/dev/null 2>&1
+sips -z 32   32    src/main/resources/app-icon.png --out "$ICONSET/icon_32x32.png"      >/dev/null 2>&1
+sips -z 64   64    src/main/resources/app-icon.png --out "$ICONSET/icon_32x32@2x.png"   >/dev/null 2>&1
+sips -z 128  128   src/main/resources/app-icon.png --out "$ICONSET/icon_128x128.png"    >/dev/null 2>&1
+sips -z 256  256   src/main/resources/app-icon.png --out "$ICONSET/icon_128x128@2x.png" >/dev/null 2>&1
+sips -z 256  256   src/main/resources/app-icon.png --out "$ICONSET/icon_256x256.png"    >/dev/null 2>&1
+sips -z 512  512   src/main/resources/app-icon.png --out "$ICONSET/icon_256x256@2x.png" >/dev/null 2>&1
+sips -z 512  512   src/main/resources/app-icon.png --out "$ICONSET/icon_512x512.png"    >/dev/null 2>&1
+sips -z 1024 1024  src/main/resources/app-icon.png --out "$ICONSET/icon_512x512@2x.png" >/dev/null 2>&1
 iconutil -c icns "$ICONSET" -o target/app-icon.icns
 
-# Always rebuild app bundle
 APP_BUNDLE="target/dist/AlbumOrganizer.app"
+DMG_FILE="target/dist/AlbumOrganizer-1.5.0.dmg"
+
 echo "Building macOS app bundle..."
 rm -rf "target/dist"
 cp target/album-organizer-1.0.0.jar target/lib/
@@ -75,8 +169,6 @@ jpackage \
     --java-options "--add-modules=javafx.controls,javafx.fxml,javafx.swing"
 rm target/lib/album-organizer-1.0.0.jar
 
-# Always rebuild DMG installer
-DMG_FILE="target/dist/AlbumOrganizer-1.5.0.dmg"
 echo "Building macOS installer (.dmg)..."
 jpackage \
     --type dmg \
@@ -87,7 +179,7 @@ jpackage \
     --dest target/dist
 
 echo ""
-echo "Build complete:"
+echo -e "${GREEN}Build complete:${NC}"
 echo "  App:       $APP_BUNDLE"
 echo "  Installer: $DMG_FILE"
 echo ""
