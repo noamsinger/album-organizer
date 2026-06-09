@@ -170,9 +170,10 @@ jpackage \
     --main-class com.albumorganizer.AlbumOrganizerApp \
     --icon target/app-icon.icns \
     --dest target/dist \
+    --add-modules javafx.controls,javafx.fxml,javafx.swing,javafx.graphics,javafx.base \
+    --module-path target/lib \
     --java-options "-Dfile.encoding=UTF-8" \
-    --java-options "-Dapple.awt.application.name=AlbumOrganizer" \
-    --java-options "--add-modules=javafx.controls,javafx.fxml,javafx.swing"
+    --java-options "-Dapple.awt.application.name=AlbumOrganizer"
 rm target/lib/album-organizer-1.0.0.jar
 
 echo "Building macOS installer (.dmg)..."

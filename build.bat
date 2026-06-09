@@ -212,8 +212,9 @@ copy /Y target\album-organizer-1.0.0.jar target\lib\ >NUL
     --icon src\main\resources\app-icon.png ^
     --dest target\dist ^
     --win-console ^
-    --java-options "-Dfile.encoding=UTF-8" ^
-    --java-options "--add-modules=javafx.controls,javafx.fxml,javafx.swing"
+    --add-modules javafx.controls,javafx.fxml,javafx.swing,javafx.graphics,javafx.base ^
+    --module-path target\lib ^
+    --java-options "-Dfile.encoding=UTF-8"
 if errorlevel 1 goto error
 
 del /Q target\lib\album-organizer-1.0.0.jar >NUL 2>&1
