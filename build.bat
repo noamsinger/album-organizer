@@ -189,7 +189,7 @@ echo.
 
 :: --- Build -------------------------------------------------------------------
 echo Building JAR...
-call "!MVN_CMD!" package -DskipTests -q
+call "!MVN_CMD!" package -DskipTests
 if errorlevel 1 goto error
 
 echo Building Windows app bundle...
