@@ -276,9 +276,19 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
         enhanceButton = new Button("Enhance");
         enhanceButton.setPrefWidth(120);
         enhanceButton.setDefaultButton(true);
-        grid.add(enhanceButton, 1, row);
 
-        enhanceButton.setOnAction(e -> runEnhancement(mediaFile, widthField, heightField, additionalPromptField.getText()));
+        CheckBox copyToClipboardCheckBox = new CheckBox("Copy result to clipboard");
+        copyToClipboardCheckBox.setSelected(false);
+        boolean isVideo = mediaFile.getType() != null
+            && mediaFile.getType() == com.albumorganizer.model.MediaType.VIDEO;
+        copyToClipboardCheckBox.setVisible(!isVideo);
+        copyToClipboardCheckBox.setManaged(!isVideo);
+
+        HBox enhanceRow = new HBox(12, enhanceButton, copyToClipboardCheckBox);
+        enhanceRow.setAlignment(Pos.CENTER_LEFT);
+        grid.add(enhanceRow, 1, row);
+
+        enhanceButton.setOnAction(e -> runEnhancement(mediaFile, widthField, heightField, additionalPromptField.getText(), copyToClipboardCheckBox.isSelected()));
 
         getDialogPane().setContent(grid);
         setResultConverter(btn -> null);
@@ -457,7 +467,7 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
         providerInfoLabel.setText(cost != null ? "Est. cost: " + cost : "Est. cost: Free / Local");
     }
 
-    private void runEnhancement(MediaFile mediaFile, TextField widthField, TextField heightField, String additionalPrompt) {
+    private void runEnhancement(MediaFile mediaFile, TextField widthField, TextField heightField, String additionalPrompt, boolean copyToClipboard) {
         EnhancementProvider provider = providerCombo.getValue();
         if (provider == null) return;
 
@@ -499,6 +509,18 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
             progressBar.setProgress(1.0);
             if (result.success()) {
                 statusLabel.setText("Saved: " + result.outputPath().getFileName());
+                if (copyToClipboard) {
+                    try {
+                        javafx.scene.image.Image image = new javafx.scene.image.Image(
+                            result.outputPath().toUri().toString());
+                        javafx.scene.input.ClipboardContent content = new javafx.scene.input.ClipboardContent();
+                        content.putImage(image);
+                        javafx.scene.input.Clipboard.getSystemClipboard().setContent(content);
+                        logger.debug("Enhanced image copied to clipboard: {}", result.outputPath());
+                    } catch (Exception ex) {
+                        logger.warn("Failed to copy enhanced image to clipboard", ex);
+                    }
+                }
                 if (onProviderUsed != null) onProviderUsed.accept(provider);
                 setResult(result);
                 close();
@@ -506,43 +528,84 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
                 progressBar.setVisible(false);
                 enhanceButton.setDisable(false);
                 statusLabel.setText("Enhancement failed.");
-                showError("Enhancement Failed", result.errorMessage());
+                showError("Enhancement Failed", result.errorMessage(), result.technicalDetail());
             }
         });
 
         task.setOnFailed(ev -> {
             Throwable ex = task.getException();
-            String msg = ex != null ? ex.getMessage() : "Unknown error";
             logger.error("Enhancement task threw an exception", ex);
             progressBar.setVisible(false);
             enhanceButton.setDisable(false);
             statusLabel.setText("Error.");
-            showError("Enhancement Error", msg);
+            String friendly = friendlyExceptionMessage(ex, provider.getName());
+            String technical = ex != null ? ex.toString() : null;
+            showError("Enhancement Error", friendly, technical);
         });
 
         new Thread(task, "enhancement-thread").start();
     }
 
     private void showError(String title, String message) {
-        logger.error("{}: {}", title, message);
+        showError(title, message, null);
+    }
+
+    private void showError(String title, String message, String technicalDetail) {
+        logger.error("{}: {} | technical: {}", title, message, technicalDetail);
 
         Dialog<Void> dialog = new Dialog<>();
         dialog.initOwner(getDialogPane().getScene().getWindow());
         dialog.setTitle(title);
         dialog.getDialogPane().getButtonTypes().add(ButtonType.CLOSE);
 
-        TextArea textArea = new TextArea(message);
-        textArea.setEditable(false);
-        textArea.setWrapText(true);
-        textArea.setPrefWidth(560);
-        textArea.setPrefHeight(220);
+        Label friendlyLabel = new Label(message != null ? message : "An unexpected error occurred.");
+        friendlyLabel.setWrapText(true);
+        friendlyLabel.setMaxWidth(520);
+        friendlyLabel.setStyle("-fx-font-size: 1.05em;");
 
-        VBox content = new VBox(8,
-            new Label("Enhancement failed. You can select and copy the error text below:"),
-            textArea);
+        VBox content = new VBox(10, friendlyLabel);
         content.setPadding(new Insets(10));
+
+        if (technicalDetail != null && !technicalDetail.isBlank()) {
+            TitledPane techPane = new TitledPane();
+            techPane.setText("Technical details");
+            techPane.setExpanded(false);
+            TextArea techArea = new TextArea(technicalDetail);
+            techArea.setEditable(false);
+            techArea.setWrapText(true);
+            techArea.setPrefWidth(520);
+            techArea.setPrefHeight(140);
+            techPane.setContent(techArea);
+            content.getChildren().add(techPane);
+        }
+
         dialog.getDialogPane().setContent(content);
         dialog.showAndWait();
+    }
+
+    private String friendlyExceptionMessage(Throwable ex, String providerName) {
+        if (ex == null) return "Unknown error.";
+        Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+        String msg = cause.getMessage() != null ? cause.getMessage().toLowerCase() : "";
+        if (cause instanceof java.net.ConnectException || msg.contains("connection refused") || msg.contains("connect")) {
+            return providerName + " could not be reached. Make sure the server is running and the URL in Settings is correct.";
+        }
+        if (cause instanceof java.net.UnknownHostException || msg.contains("unknown host")) {
+            return "Could not resolve the server address for " + providerName + ". Check the URL in Settings.";
+        }
+        if (cause instanceof java.net.SocketTimeoutException || msg.contains("timed out") || msg.contains("timeout")) {
+            return providerName + " took too long to respond. The server may be overloaded or offline.";
+        }
+        if (msg.contains("401") || msg.contains("unauthorized")) {
+            return "Authentication failed for " + providerName + ". Check your API key in Settings.";
+        }
+        if (msg.contains("403") || msg.contains("forbidden")) {
+            return "Access denied by " + providerName + ". Your API key may not have permission for this operation.";
+        }
+        if (msg.contains("429") || msg.contains("rate limit") || msg.contains("too many requests")) {
+            return providerName + " rate limit reached. Wait a moment and try again.";
+        }
+        return ex.getMessage() != null ? ex.getMessage() : "Unexpected error from " + providerName + ".";
     }
 
     private Dimension resolveSize(MediaFile mediaFile, TextField widthField, TextField heightField) {

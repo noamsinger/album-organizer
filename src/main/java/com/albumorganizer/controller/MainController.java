@@ -435,6 +435,14 @@ public class MainController {
             }
         });
 
+        MenuItem copyImageItem = new MenuItem("Copy Image");
+        copyImageItem.setOnAction(e -> {
+            MediaFile selected = mediaTable.getSelectionModel().getSelectedItem();
+            if (selected != null) {
+                copyImageToClipboard(selected);
+            }
+        });
+
         MenuItem removeOtherDuplicatesItem = new MenuItem("Remove Other Duplicates");
         removeOtherDuplicatesItem.setOnAction(e -> {
             MediaFile selected = mediaTable.getSelectionModel().getSelectedItem();
@@ -495,8 +503,13 @@ public class MainController {
             organizeFileItem.setDisable(!hasTargetFolder || isInTarget);
 
             boolean hasProviders = !imageEnhancementService.getConfiguredProviders().isEmpty();
+            boolean selectedIsImage = selected != null && selected.getType() == MediaType.IMAGE;
+            boolean selectedIsVideo = selected != null && selected.getType() == MediaType.VIDEO;
+            boolean hasVideoProviders = imageEnhancementService.getConfiguredProviders().stream()
+                .anyMatch(com.albumorganizer.service.enhancement.EnhancementProvider::supportsVideo);
             enhanceWithAiItem.setDisable(selected == null || !hasProviders
-                || selected.getType() != MediaType.IMAGE);
+                || (!selectedIsImage && !(selectedIsVideo && hasVideoProviders)));
+            copyImageItem.setDisable(selected == null || selected.getType() != MediaType.IMAGE);
         });
 
         contextMenu.getItems().addAll(
@@ -505,6 +518,7 @@ public class MainController {
             new SeparatorMenuItem(),
             copyPathItem,
             copyFilenameItem,
+            copyImageItem,
             new SeparatorMenuItem(),
             removeOtherDuplicatesItem,
             deleteFileItem,
@@ -989,6 +1003,25 @@ public class MainController {
         statusLabel.setText("Filename copied to clipboard");
     }
 
+    private void copyImageToClipboard(MediaFile mediaFile) {
+        if (mediaFile == null || mediaFile.getAbsolutePath() == null) {
+            return;
+        }
+        try {
+            javafx.scene.image.Image image = new javafx.scene.image.Image(
+                mediaFile.getAbsolutePath().toUri().toString());
+            javafx.scene.input.Clipboard clipboard = javafx.scene.input.Clipboard.getSystemClipboard();
+            javafx.scene.input.ClipboardContent content = new javafx.scene.input.ClipboardContent();
+            content.putImage(image);
+            clipboard.setContent(content);
+            logger.debug("Copied image to clipboard: {}", mediaFile.getAbsolutePath());
+            statusLabel.setText("Image copied to clipboard");
+        } catch (Exception e) {
+            logger.error("Failed to copy image to clipboard: {}", mediaFile.getAbsolutePath(), e);
+            statusLabel.setText("Failed to copy image to clipboard");
+        }
+    }
+
     private void setTargetFolder(Path path) {
         settings.setTargetFolder(path);
         configRepository.setOrganizeSettings(settings);
@@ -1084,9 +1117,15 @@ public class MainController {
         // Always output to the AI-Generated folder
         Path outputDir = settings.getAiGeneratedFolder();
 
+        boolean isVideo = mediaFile.getType() == MediaType.VIDEO;
+        List<com.albumorganizer.service.enhancement.EnhancementProvider> eligibleProviders =
+            imageEnhancementService.getConfiguredProviders().stream()
+                .filter(p -> !isVideo || p.supportsVideo())
+                .toList();
+
         EnhancementDialog dialog = new EnhancementDialog(
             mediaFile,
-            imageEnhancementService.getConfiguredProviders(),
+            eligibleProviders,
             savedPrompts,
             fontScale,
             lastUsedProvider,
@@ -2798,6 +2837,9 @@ public class MainController {
         MenuItem copyFilenameItem = new MenuItem("Copy Filename");
         copyFilenameItem.setOnAction(e -> copyFilenameToClipboard(mediaFile));
 
+        MenuItem copyImageItem = new MenuItem("Copy Image");
+        copyImageItem.setOnAction(e -> copyImageToClipboard(mediaFile));
+
         MenuItem removeOtherDuplicatesItem = new MenuItem("Remove Other Duplicates");
         removeOtherDuplicatesItem.setOnAction(e -> removeOtherDuplicates(mediaFile));
 
@@ -2815,7 +2857,11 @@ public class MainController {
             boolean hasDupes = hasDuplicates(mediaFile);
             removeOtherDuplicatesItem.setDisable(!hasDupes);
             enhanceWithAiItem.setDisable(imageEnhancementService.getConfiguredProviders().isEmpty()
-                || mediaFile.getType() != MediaType.IMAGE);
+                || (mediaFile.getType() != MediaType.IMAGE
+                    && !(mediaFile.getType() == MediaType.VIDEO
+                        && imageEnhancementService.getConfiguredProviders().stream()
+                            .anyMatch(com.albumorganizer.service.enhancement.EnhancementProvider::supportsVideo))));
+            copyImageItem.setDisable(mediaFile.getType() != MediaType.IMAGE);
             boolean hasBin = settings != null && settings.getRecycleBinFolder() != null;
             boolean isInBin = hasBin && mediaFile.getAbsolutePath().startsWith(settings.getRecycleBinFolder());
             deleteFileThumbItem.setDisable(!hasBin || isInBin);
@@ -2829,6 +2875,7 @@ public class MainController {
             new SeparatorMenuItem(),
             copyPathItem,
             copyFilenameItem,
+            copyImageItem,
             new SeparatorMenuItem(),
             removeOtherDuplicatesItem,
             deleteFileThumbItem,

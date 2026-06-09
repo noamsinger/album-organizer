@@ -27,7 +27,7 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
     private final TextField lowResPixelsField;
     private final TextField hiResPixelsField;
 
-    // Cloud image AI fields
+    // Cloud AI fields
     private final CheckBox stabilityEnabledCheck;
     private final PasswordField stabilityKeyField;
     private final CheckBox openAiEnabledCheck;
@@ -37,15 +37,15 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
     private final CheckBox grokEnabledCheck;
     private final PasswordField grokKeyField;
 
-    // Local image AI fields
+    // Local AI fields
     private final CheckBox sdLocalEnabledCheck;
     private final TextField sdLocalUrlField;
-    private final CheckBox comfyUiEnabledCheck;
-    private final TextField comfyUiUrlField;
     private final CheckBox invokeAiEnabledCheck;
     private final TextField invokeAiUrlField;
     private final CheckBox realEsrganEnabledCheck;
     private final TextField realEsrganPathField;
+    private final CheckBox comfyUiEnabledCheck;
+    private final TextField comfyUiUrlField;
 
     public SettingsDialog(AlbumOrganizerSettings currentSettings, EnhancementConfig currentEnhancement, double fontScale) {
         setTitle("Settings");
@@ -111,195 +111,196 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
         lowResPixelsField.setDisable(!splitResolutionCheck.isSelected());
         hiResPixelsField.setDisable(!splitResolutionCheck.isSelected());
 
-        // ── Image Cloud AI tab ────────────────────────────────────────────────
-        GridPane cloudGrid = new GridPane();
-        cloudGrid.setHgap(10);
-        cloudGrid.setVgap(8);
-        cloudGrid.setPadding(new Insets(20, 20, 10, 10));
-        int cRow = 0;
+        // ── Single AI Enhancement grid ────────────────────────────────────────
+        GridPane aiGrid = new GridPane();
+        aiGrid.setHgap(10);
+        aiGrid.setVgap(8);
+        aiGrid.setPadding(new Insets(16, 20, 16, 16));
+        int ai = 0;
 
-        cloudGrid.add(sectionHeading("Stability AI",
+        // ═══ CLOUD ═══════════════════════════════════════════════════════════
+        aiGrid.add(sectionBanner("☁  Cloud (API-based)"), 0, ai, 2, 1); ai++;
+        aiGrid.add(categoryLabel("Image enhancement"), 0, ai, 2, 1); ai++;
+
+        // Stability AI
+        aiGrid.add(toolHeading("Stability AI",
+            "Professional image upscaling and creative enhancement via Stability AI's cloud API. " +
+            "Requires a paid API key. Best for high-quality upscaling and creative transformations.",
             "How do I set up Stability AI API access to use their image upscaling and enhancement API? " +
-            "Give me step-by-step instructions: how to create an account at platform.stability.ai, " +
-            "add billing, generate an API key, and verify it works using a curl command that calls " +
-            "the creative upscale endpoint POST https://api.stability.ai/v2beta/stable-image/upscale/creative " +
-            "with a sample image. Include the exact curl command I can run in my terminal."),
-            0, cRow, 2, 1); cRow++;
+            "Step-by-step: create account at platform.stability.ai, add billing, generate API key, " +
+            "and verify with curl to POST https://api.stability.ai/v2beta/stable-image/upscale/creative"),
+            0, ai, 2, 1); ai++;
         stabilityEnabledCheck = new CheckBox("Enabled");
         stabilityEnabledCheck.setSelected(currentEnhancement.stabilityAiEnabled());
-        cloudGrid.add(stabilityEnabledCheck, 0, cRow, 2, 1); cRow++;
-        cloudGrid.add(new Label("API Key:"), 0, cRow);
+        aiGrid.add(stabilityEnabledCheck, 0, ai, 2, 1); ai++;
+        aiGrid.add(new Label("API Key:"), 0, ai);
         stabilityKeyField = new PasswordField();
         stabilityKeyField.setText(currentEnhancement.stabilityAiKey());
         stabilityKeyField.setPrefWidth(320);
         stabilityKeyField.setPromptText("sk-...");
-        cloudGrid.add(stabilityKeyField, 1, cRow); cRow++;
+        aiGrid.add(stabilityKeyField, 1, ai); ai++;
         bindToCheck(stabilityEnabledCheck, stabilityKeyField);
+        aiGrid.add(new Separator(), 0, ai, 2, 1); ai++;
 
-        cloudGrid.add(new Separator(), 0, cRow, 2, 1); cRow++;
-
-        cloudGrid.add(sectionHeading("OpenAI DALL·E",
+        // OpenAI DALL·E
+        aiGrid.add(toolHeading("OpenAI DALL·E",
+            "Image editing and generation using OpenAI's DALL·E model. " +
+            "Supports prompt-driven inpainting and creative enhancement. Requires a paid OpenAI API key.",
             "How do I set up an OpenAI API key to use the DALL-E image editing API for image enhancement? " +
-            "Give me step-by-step instructions: how to create an OpenAI account at platform.openai.com, " +
-            "add a payment method, generate a secret API key, and verify it works with a curl command " +
-            "that calls POST https://api.openai.com/v1/images/edits with a PNG image and a prompt. " +
-            "Include the exact curl command I can copy and run in my terminal."),
-            0, cRow, 2, 1); cRow++;
+            "Step-by-step: create account at platform.openai.com, add payment, generate secret API key, " +
+            "and verify with curl to POST https://api.openai.com/v1/images/edits"),
+            0, ai, 2, 1); ai++;
         openAiEnabledCheck = new CheckBox("Enabled");
         openAiEnabledCheck.setSelected(currentEnhancement.openAiEnabled());
-        cloudGrid.add(openAiEnabledCheck, 0, cRow, 2, 1); cRow++;
-        cloudGrid.add(new Label("API Key:"), 0, cRow);
+        aiGrid.add(openAiEnabledCheck, 0, ai, 2, 1); ai++;
+        aiGrid.add(new Label("API Key:"), 0, ai);
         openAiKeyField = new PasswordField();
         openAiKeyField.setText(currentEnhancement.openAiKey());
         openAiKeyField.setPrefWidth(320);
         openAiKeyField.setPromptText("sk-...");
-        cloudGrid.add(openAiKeyField, 1, cRow);
+        aiGrid.add(openAiKeyField, 1, ai); ai++;
         bindToCheck(openAiEnabledCheck, openAiKeyField);
+        aiGrid.add(new Separator(), 0, ai, 2, 1); ai++;
 
-        cloudGrid.add(new Separator(), 0, cRow + 1, 2, 1); cRow += 2;
-
-        cloudGrid.add(sectionHeading("Google Gemini",
-            "How do I set up a Google Gemini API key to use the Gemini image generation API for image enhancement? " +
-            "Give me step-by-step instructions: how to go to aistudio.google.com, create an API key, " +
-            "and verify it works with a curl command that calls the gemini-2.0-flash-exp-image-generation model. " +
-            "Include the exact curl command I can run in my terminal."),
-            0, cRow, 2, 1); cRow++;
+        // Google Gemini
+        aiGrid.add(toolHeading("Google Gemini",
+            "Prompt-driven image generation and enhancement using Google's Gemini multimodal model. " +
+            "Free tier available. Good for creative reinterpretation and style transfer.",
+            "How do I set up a Google Gemini API key to use the Gemini image generation API? " +
+            "Step-by-step: go to aistudio.google.com, create API key, " +
+            "and verify with curl to the gemini-2.0-flash-exp-image-generation model"),
+            0, ai, 2, 1); ai++;
         geminiEnabledCheck = new CheckBox("Enabled");
         geminiEnabledCheck.setSelected(currentEnhancement.geminiEnabled());
-        cloudGrid.add(geminiEnabledCheck, 0, cRow, 2, 1); cRow++;
-        cloudGrid.add(new Label("API Key:"), 0, cRow);
+        aiGrid.add(geminiEnabledCheck, 0, ai, 2, 1); ai++;
+        aiGrid.add(new Label("API Key:"), 0, ai);
         geminiKeyField = new PasswordField();
         geminiKeyField.setText(currentEnhancement.geminiKey());
         geminiKeyField.setPrefWidth(320);
         geminiKeyField.setPromptText("AIza...");
-        cloudGrid.add(geminiKeyField, 1, cRow);
+        aiGrid.add(geminiKeyField, 1, ai); ai++;
         bindToCheck(geminiEnabledCheck, geminiKeyField);
+        aiGrid.add(new Separator(), 0, ai, 2, 1); ai++;
 
-        cloudGrid.add(new Separator(), 0, cRow + 1, 2, 1); cRow += 2;
-
-        cloudGrid.add(sectionHeading("Grok xAI",
-            "How do I set up a Grok xAI API key to use their image generation API for image enhancement? " +
-            "Give me step-by-step instructions: how to go to console.x.ai, create an API key, " +
-            "and verify it works with a curl command that calls POST https://api.x.ai/v1/images/generations " +
-            "with a prompt. Include the exact curl command I can run in my terminal."),
-            0, cRow, 2, 1); cRow++;
+        // Grok xAI
+        aiGrid.add(toolHeading("Grok xAI",
+            "Image generation using xAI's Grok model. " +
+            "Prompt-driven enhancement via the Aurora image generation endpoint. Requires a paid xAI API key.",
+            "How do I set up a Grok xAI API key to use their image generation API? " +
+            "Step-by-step: go to console.x.ai, create API key, " +
+            "and verify with curl to POST https://api.x.ai/v1/images/generations"),
+            0, ai, 2, 1); ai++;
         grokEnabledCheck = new CheckBox("Enabled");
         grokEnabledCheck.setSelected(currentEnhancement.grokEnabled());
-        cloudGrid.add(grokEnabledCheck, 0, cRow, 2, 1); cRow++;
-        cloudGrid.add(new Label("API Key:"), 0, cRow);
+        aiGrid.add(grokEnabledCheck, 0, ai, 2, 1); ai++;
+        aiGrid.add(new Label("API Key:"), 0, ai);
         grokKeyField = new PasswordField();
         grokKeyField.setText(currentEnhancement.grokKey());
         grokKeyField.setPrefWidth(320);
         grokKeyField.setPromptText("xai-...");
-        cloudGrid.add(grokKeyField, 1, cRow);
+        aiGrid.add(grokKeyField, 1, ai); ai++;
         bindToCheck(grokEnabledCheck, grokKeyField);
 
-        // ── Image Local AI tab ────────────────────────────────────────────────
-        GridPane localGrid = new GridPane();
-        localGrid.setHgap(10);
-        localGrid.setVgap(8);
-        localGrid.setPadding(new Insets(20, 20, 10, 10));
-        int lRow = 0;
+        // ═══ LOCAL ═══════════════════════════════════════════════════════════
+        aiGrid.add(new Separator(), 0, ai, 2, 1); ai++;
+        aiGrid.add(sectionBanner("🖥  Local (self-hosted)"), 0, ai, 2, 1); ai++;
+        aiGrid.add(categoryLabel("Image enhancement"), 0, ai, 2, 1); ai++;
 
-        localGrid.add(sectionHeading("Stable Diffusion WebUI (AUTOMATIC1111)",
-            "How do I install AUTOMATIC1111 Stable Diffusion WebUI on a Mac so I can use its REST API " +
-            "for image-to-image enhancement at http://localhost:7860? " +
-            "Give me step-by-step shell commands starting from a clean Mac: " +
-            "install Homebrew, Python, git, clone the repo from github.com/AUTOMATIC1111/stable-diffusion-webui, " +
-            "run the installer script with the --api flag enabled, download a model checkpoint, " +
-            "and verify the API is running with a curl test to /sdapi/v1/sd-models. " +
-            "Include every shell command I need to copy and run."),
-            0, lRow, 2, 1); lRow++;
+        // Stable Diffusion WebUI
+        aiGrid.add(toolHeading("Stable Diffusion WebUI (AUTOMATIC1111)",
+            "Local img2img enhancement using AUTOMATIC1111's Stable Diffusion web UI. " +
+            "Runs fully on your machine — no API costs. Requires a GPU for practical speed.",
+            "How do I install AUTOMATIC1111 Stable Diffusion WebUI on a Mac for REST API use at http://localhost:7860? " +
+            "Step-by-step shell commands: install Homebrew, Python, git, " +
+            "clone github.com/AUTOMATIC1111/stable-diffusion-webui, run with --api flag, " +
+            "download a checkpoint, and verify with curl to /sdapi/v1/sd-models"),
+            0, ai, 2, 1); ai++;
         sdLocalEnabledCheck = new CheckBox("Enabled");
         sdLocalEnabledCheck.setSelected(currentEnhancement.sdLocalEnabled());
-        localGrid.add(sdLocalEnabledCheck, 0, lRow, 2, 1); lRow++;
-        localGrid.add(new Label("Base URL:"), 0, lRow);
+        aiGrid.add(sdLocalEnabledCheck, 0, ai, 2, 1); ai++;
+        aiGrid.add(new Label("Base URL:"), 0, ai);
         sdLocalUrlField = new TextField(currentEnhancement.sdLocalUrl());
         sdLocalUrlField.setPrefWidth(300);
         sdLocalUrlField.setPromptText("http://localhost:7860");
-        localGrid.add(sdLocalUrlField, 1, lRow); lRow++;
+        aiGrid.add(sdLocalUrlField, 1, ai); ai++;
         bindToCheck(sdLocalEnabledCheck, sdLocalUrlField);
+        aiGrid.add(new Separator(), 0, ai, 2, 1); ai++;
 
-        localGrid.add(new Separator(), 0, lRow, 2, 1); lRow++;
-
-        localGrid.add(sectionHeading("ComfyUI",
-            "How do I install ComfyUI on a Mac so I can use its REST API for image enhancement at http://localhost:8188? " +
-            "Give me step-by-step shell commands: install Python and git using Homebrew, " +
-            "clone https://github.com/comfyanonymous/ComfyUI, create a Python virtual environment, " +
-            "install requirements, launch with python main.py --listen, download a model checkpoint into the models/checkpoints folder, " +
-            "and verify the API works with a curl test to /history. " +
-            "Include every shell command I need to copy and run."),
-            0, lRow, 2, 1); lRow++;
-        comfyUiEnabledCheck = new CheckBox("Enabled");
-        comfyUiEnabledCheck.setSelected(currentEnhancement.comfyUiEnabled());
-        localGrid.add(comfyUiEnabledCheck, 0, lRow, 2, 1); lRow++;
-        localGrid.add(new Label("Base URL:"), 0, lRow);
-        comfyUiUrlField = new TextField(currentEnhancement.comfyUiUrl());
-        comfyUiUrlField.setPrefWidth(300);
-        comfyUiUrlField.setPromptText("http://localhost:8188");
-        localGrid.add(comfyUiUrlField, 1, lRow); lRow++;
-        bindToCheck(comfyUiEnabledCheck, comfyUiUrlField);
-
-        localGrid.add(new Separator(), 0, lRow, 2, 1); lRow++;
-
-        localGrid.add(sectionHeading("InvokeAI",
-            "How do I install InvokeAI on a Mac so I can use its REST API for image enhancement at http://localhost:9090? " +
-            "Give me step-by-step shell commands: install Python using Homebrew, " +
-            "run the official installer script or pip install invokeai, launch the server, " +
-            "download a model through the web UI or CLI, " +
-            "and verify the API works with a curl test to /api/v1/app/version. " +
-            "Include every shell command I need to copy and run."),
-            0, lRow, 2, 1); lRow++;
+        // InvokeAI
+        aiGrid.add(toolHeading("InvokeAI",
+            "Polished local Stable Diffusion server with a clean REST API. " +
+            "Easier to set up than AUTOMATIC1111. Runs on your machine — no API costs. GPU recommended.",
+            "How do I install InvokeAI on a Mac for REST API use at http://localhost:9090? " +
+            "Step-by-step shell commands: install Python via Homebrew, " +
+            "run the official installer or pip install invokeai, launch server, download a model, " +
+            "and verify with curl to /api/v1/app/version"),
+            0, ai, 2, 1); ai++;
         invokeAiEnabledCheck = new CheckBox("Enabled");
         invokeAiEnabledCheck.setSelected(currentEnhancement.invokeAiEnabled());
-        localGrid.add(invokeAiEnabledCheck, 0, lRow, 2, 1); lRow++;
-        localGrid.add(new Label("Base URL:"), 0, lRow);
+        aiGrid.add(invokeAiEnabledCheck, 0, ai, 2, 1); ai++;
+        aiGrid.add(new Label("Base URL:"), 0, ai);
         invokeAiUrlField = new TextField(currentEnhancement.invokeAiUrl());
         invokeAiUrlField.setPrefWidth(300);
         invokeAiUrlField.setPromptText("http://localhost:9090");
-        localGrid.add(invokeAiUrlField, 1, lRow); lRow++;
+        aiGrid.add(invokeAiUrlField, 1, ai); ai++;
         bindToCheck(invokeAiEnabledCheck, invokeAiUrlField);
+        aiGrid.add(new Separator(), 0, ai, 2, 1); ai++;
 
-        localGrid.add(new Separator(), 0, lRow, 2, 1); lRow++;
-
-        localGrid.add(sectionHeading("Real-ESRGAN (no prompt)",
-            "How do I download the Real-ESRGAN ONNX model file for use with Java ONNX Runtime on a Mac? " +
-            "Give me the exact shell commands to: create the directory ~/.config/album-organizer/models/, " +
-            "download RealESRGAN_x4plus.onnx from the official GitHub release at " +
-            "https://github.com/xinntao/Real-ESRGAN using curl or wget, " +
-            "and verify the file downloaded correctly by checking its size. " +
-            "No GPU or Python required — it runs on CPU via Java ONNX Runtime."),
-            0, lRow, 2, 1); lRow++;
+        // Real-ESRGAN
+        aiGrid.add(toolHeading("Real-ESRGAN",
+            "Fast, high-quality image upscaling using the Real-ESRGAN neural network model. " +
+            "No prompts — pure upscaling. Runs on CPU via Java ONNX Runtime, no GPU required. " +
+            "Download the ONNX model file once and point to it below.",
+            "How do I download the Real-ESRGAN ONNX model for use with Java ONNX Runtime on a Mac? " +
+            "Shell commands: mkdir ~/.config/album-organizer/models/, " +
+            "download RealESRGAN_x4plus.onnx from github.com/xinntao/Real-ESRGAN releases via curl, " +
+            "and verify the file size"),
+            0, ai, 2, 1); ai++;
         realEsrganEnabledCheck = new CheckBox("Enabled");
         realEsrganEnabledCheck.setSelected(currentEnhancement.realEsrganEnabled());
-        localGrid.add(realEsrganEnabledCheck, 0, lRow, 2, 1); lRow++;
-        localGrid.add(new Label("Model path:"), 0, lRow);
+        aiGrid.add(realEsrganEnabledCheck, 0, ai, 2, 1); ai++;
+        aiGrid.add(new Label("Model path:"), 0, ai);
         realEsrganPathField = new TextField(currentEnhancement.realEsrganModelPath());
         realEsrganPathField.setPrefWidth(300);
         realEsrganPathField.setPromptText("~/.config/album-organizer/models/RealESRGAN_x4plus.onnx");
-        localGrid.add(realEsrganPathField, 1, lRow);
+        aiGrid.add(realEsrganPathField, 1, ai); ai++;
         bindToCheck(realEsrganEnabledCheck, realEsrganPathField);
 
-        // ── Placeholder tabs ──────────────────────────────────────────────────
-        VBox videoCloudPane = placeholderPane("Video Cloud AI enhancement coming soon.");
-        VBox videoLocalPane = placeholderPane("Video Local AI enhancement coming soon.");
+        aiGrid.add(new Separator(), 0, ai, 2, 1); ai++;
+        aiGrid.add(categoryLabel("Image + Video enhancement"), 0, ai, 2, 1); ai++;
 
-        // ── Assemble AI sub-tabs ──────────────────────────────────────────────
-        TabPane aiTabPane = new TabPane();
-        aiTabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
-        aiTabPane.getTabs().addAll(
-            new Tab("Image Cloud AI", new ScrollPane(cloudGrid) {{ setFitToWidth(true); }}),
-            new Tab("Image Local AI", new ScrollPane(localGrid) {{ setFitToWidth(true); }}),
-            new Tab("Video Cloud AI", videoCloudPane),
-            new Tab("Video Local AI", videoLocalPane)
-        );
+        // ComfyUI
+        aiGrid.add(toolHeading("ComfyUI",
+            "Flexible node-based AI pipeline that supports both image and video enhancement. " +
+            "Image: img2img via KSampler. Video: frame-by-frame enhancement via ComfyUI-VideoHelperSuite (VHS). " +
+            "Runs fully on your machine. GPU strongly recommended for video.",
+            "How do I install ComfyUI on a Mac for REST API use at http://localhost:8188, " +
+            "and also install ComfyUI-VideoHelperSuite for video support? " +
+            "Step-by-step: install Python and git via Homebrew, clone github.com/comfyanonymous/ComfyUI, " +
+            "create venv, install requirements, launch with python main.py --listen, " +
+            "download a checkpoint into models/checkpoints, " +
+            "then clone github.com/Kosinkadink/ComfyUI-VideoHelperSuite into custom_nodes and restart. " +
+            "Verify with curl to /history"),
+            0, ai, 2, 1); ai++;
+        comfyUiEnabledCheck = new CheckBox("Enabled");
+        comfyUiEnabledCheck.setSelected(currentEnhancement.comfyUiEnabled());
+        aiGrid.add(comfyUiEnabledCheck, 0, ai, 2, 1); ai++;
+        aiGrid.add(new Label("Base URL:"), 0, ai);
+        comfyUiUrlField = new TextField(currentEnhancement.comfyUiUrl());
+        comfyUiUrlField.setPrefWidth(300);
+        comfyUiUrlField.setPromptText("http://localhost:8188");
+        aiGrid.add(comfyUiUrlField, 1, ai);
+        bindToCheck(comfyUiEnabledCheck, comfyUiUrlField);
 
         // ── Top-level tabs ────────────────────────────────────────────────────
+        ScrollPane aiScroll = new ScrollPane(aiGrid);
+        aiScroll.setFitToWidth(true);
+
         TabPane tabPane = new TabPane();
         tabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
         tabPane.getTabs().addAll(
             new Tab("Organize", organizeGrid),
-            new Tab("AI Enhancement", aiTabPane)
+            new Tab("AI Enhancement", aiScroll)
         );
         tabPane.setPrefHeight(560);
 
@@ -325,6 +326,39 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
+    private VBox toolHeading(String title, String description, String searchQuery) {
+        Label titleLabel = new Label(title);
+        titleLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 1.05em;");
+        Button btn = new Button("How to set up");
+        btn.setStyle("-fx-font-size: 0.85em;");
+        btn.setOnAction(e -> openSearch(searchQuery));
+        HBox titleRow = new HBox(10, titleLabel, btn);
+        titleRow.setAlignment(Pos.CENTER_LEFT);
+
+        Label descLabel = new Label(description);
+        descLabel.setWrapText(true);
+        descLabel.setMaxWidth(480);
+        descLabel.setStyle("-fx-text-fill: #555; -fx-font-size: 0.9em;");
+
+        VBox box = new VBox(3, titleRow, descLabel);
+        box.setPadding(new Insets(4, 0, 2, 0));
+        return box;
+    }
+
+    /** Bold banner for a major section (Cloud / Local). */
+    private Label sectionBanner(String text) {
+        Label label = new Label(text);
+        label.setStyle("-fx-font-weight: bold; -fx-font-size: 1.15em; -fx-padding: 8 0 2 0;");
+        return label;
+    }
+
+    /** Italic sub-category label (Image / Video / Image+Video). */
+    private Label categoryLabel(String text) {
+        Label label = new Label(text);
+        label.setStyle("-fx-font-style: italic; -fx-text-fill: #444; -fx-padding: 2 0 4 0;");
+        return label;
+    }
+
     private HBox sectionHeading(String title, String searchQuery) {
         Label label = new Label(title);
         label.setStyle("-fx-font-weight: bold;");
@@ -332,15 +366,6 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
         btn.setOnAction(e -> openSearch(searchQuery));
         HBox box = new HBox(10, label, btn);
         box.setAlignment(Pos.CENTER_LEFT);
-        return box;
-    }
-
-    private VBox placeholderPane(String message) {
-        Label lbl = new Label(message);
-        lbl.setStyle("-fx-text-fill: #888; -fx-font-style: italic;");
-        VBox box = new VBox(lbl);
-        box.setPadding(new Insets(40));
-        box.setAlignment(Pos.CENTER);
         return box;
     }
 

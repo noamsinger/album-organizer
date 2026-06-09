@@ -15,6 +15,9 @@ public interface EnhancementProvider {
 
     boolean supportsPrompt();
 
+    /** Whether this provider can enhance video files. Default: false (image only). */
+    default boolean supportsVideo() { return false; }
+
     EnhancementResult enhance(EnhancementRequest request) throws IOException;
 
     /**

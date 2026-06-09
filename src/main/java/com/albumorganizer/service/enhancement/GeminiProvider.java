@@ -66,7 +66,7 @@ public class GeminiProvider implements EnhancementProvider {
             resp = http.send(req, HttpResponse.BodyHandlers.ofString());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return new EnhancementResult(null, false, "Request interrupted");
+            return EnhancementResult.failure("Request interrupted");
         }
 
         if (resp.statusCode() != 200) {
@@ -80,19 +80,19 @@ public class GeminiProvider implements EnhancementProvider {
                     errMsg = err.has("message") ? err.get("message").getAsString() : err.toString();
                 }
             } catch (Exception ignored) {}
-            return new EnhancementResult(null, false, "Gemini API error " + resp.statusCode() + ": " + errMsg);
+            return EnhancementResult.failure("Gemini API error " + resp.statusCode() + ": " + errMsg);
         }
 
         byte[] resultBytes = extractImageBytes(resp.body());
         if (resultBytes == null) {
             logger.error("Gemini response contained no image data. Body snippet: {}",
                 resp.body().length() > 500 ? resp.body().substring(0, 500) : resp.body());
-            return new EnhancementResult(null, false, "Gemini response contained no image data");
+            return EnhancementResult.failure("Gemini response contained no image data");
         }
 
         Path outputPath = ImageUtils.saveAsJpeg(resultBytes, request.inputPath(), getShortId(), request.outputDir());
         logger.info("Gemini enhanced image saved to {}", outputPath);
-        return new EnhancementResult(outputPath, true, null);
+        return EnhancementResult.ok(outputPath);
     }
 
     private byte[] extractImageBytes(String json) {
