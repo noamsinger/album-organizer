@@ -189,6 +189,7 @@ echo.
 
 :: --- Build -------------------------------------------------------------------
 echo Building JAR...
+echo [..] Downloading dependencies (first build downloads ~200 MB -- this may take a few minutes)...
 call "!MVN_CMD!" package -DskipTests
 if errorlevel 1 goto error
 
