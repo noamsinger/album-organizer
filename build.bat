@@ -46,8 +46,19 @@ if errorlevel 1 (
         echo       Then add Maven bin\ to your PATH.
         exit /b 1
     )
-    echo [OK]  Maven installed. Re-open this terminal so mvn is on PATH, then re-run build.bat.
-    exit /b 0
+    :: winget does not update the current session PATH, so find mvn.cmd and add its folder
+    set MVN_BIN=
+    for /f "delims=" %%p in ('dir /s /b "%ProgramFiles%\Maven\*mvn.cmd" 2^>NUL') do set MVN_BIN=%%~dpp
+    if not defined MVN_BIN (
+        for /f "delims=" %%p in ('dir /s /b "%ProgramFiles(x86)%\Maven\*mvn.cmd" 2^>NUL') do set MVN_BIN=%%~dpp
+    )
+    if defined MVN_BIN (
+        set "PATH=!MVN_BIN!;%PATH%"
+        for /f "tokens=3" %%v in ('mvn --version 2^>^&1 ^| findstr /i "Apache Maven"') do echo [OK]  Maven %%v (added to PATH for this session)
+    ) else (
+        echo [OK]  Maven installed. Re-open this terminal so mvn is on PATH, then re-run build.bat.
+        exit /b 0
+    )
 ) else (
     for /f "tokens=3" %%v in ('mvn --version 2^>^&1 ^| findstr /i "Apache Maven"') do echo [OK]  Maven %%v
 )
@@ -55,10 +66,22 @@ if errorlevel 1 (
 :: --- jpackage (bundled with JDK 14+) -----------------------------------------
 where jpackage >NUL 2>&1
 if errorlevel 1 (
-    echo [XX]  jpackage not found.
-    echo       Make sure JAVA_HOME\bin is on your PATH.
-    echo       jpackage is included in JDK 17+. Re-open terminal after installing Java.
-    exit /b 1
+    :: Try to locate jpackage under common Temurin / JDK install paths
+    set JP_BIN=
+    for /f "delims=" %%p in ('dir /s /b "%ProgramFiles%\Eclipse Adoptium\*jpackage.exe" 2^>NUL') do set JP_BIN=%%~dpp
+    if not defined JP_BIN (
+        for /f "delims=" %%p in ('dir /s /b "%ProgramFiles%\Java\*jpackage.exe" 2^>NUL') do set JP_BIN=%%~dpp
+    )
+    if defined JP_BIN (
+        set "PATH=!JP_BIN!;%PATH%"
+        if not defined JAVA_HOME set "JAVA_HOME=!JP_BIN!\.."
+        echo [OK]  jpackage (added to PATH for this session)
+    ) else (
+        echo [XX]  jpackage not found.
+        echo       Make sure JAVA_HOME\bin is on your PATH.
+        echo       jpackage is included in JDK 17+. Re-open terminal after installing Java.
+        exit /b 1
+    )
 ) else (
     echo [OK]  jpackage
 )
@@ -73,8 +96,18 @@ if errorlevel 1 (
         echo       Install manually: https://wixtoolset.org/releases/
         echo       Then add WiX bin to PATH and re-run build.bat.
     ) else (
-        echo [OK]  WiX Toolset installed. Re-open this terminal so candle is on PATH.
-        exit /b 0
+        set WIX_BIN=
+        for /f "delims=" %%p in ('dir /s /b "%ProgramFiles(x86)%\WiX Toolset*\bin\candle.exe" 2^>NUL') do set WIX_BIN=%%~dpp
+        if not defined WIX_BIN (
+            for /f "delims=" %%p in ('dir /s /b "%ProgramFiles%\WiX Toolset*\bin\candle.exe" 2^>NUL') do set WIX_BIN=%%~dpp
+        )
+        if defined WIX_BIN (
+            set "PATH=!WIX_BIN!;%PATH%"
+            echo [OK]  WiX Toolset (added to PATH for this session)
+        ) else (
+            echo [OK]  WiX Toolset installed. Re-open this terminal so candle is on PATH.
+            exit /b 0
+        )
     )
 ) else (
     echo [OK]  WiX Toolset
