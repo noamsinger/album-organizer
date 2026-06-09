@@ -33,7 +33,10 @@
     </properties>
 
     <dependencies>
-        <!-- JavaFX -->
+        <!-- JavaFX: unclassified deps for compilation and 'mvn javafx:run'.
+             Platform profiles below add the same modules with platform
+             classifiers at runtime scope; copy-dependencies uses
+             includeClassifiers so it copies only the classified (native) jars. -->
         <dependency>
             <groupId>org.openjfx</groupId>
             <artifactId>javafx-controls</artifactId>
@@ -47,6 +50,16 @@
         <dependency>
             <groupId>org.openjfx</groupId>
             <artifactId>javafx-swing</artifactId>
+            <version>${javafx.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-graphics</artifactId>
+            <version>${javafx.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-base</artifactId>
             <version>${javafx.version}</version>
         </dependency>
 
@@ -158,6 +171,7 @@
                 <version>0.0.8</version>
                 <configuration>
                     <mainClass>com.albumorganizer.AlbumOrganizerApp</mainClass>
+                    <executable>${java.home}/bin/java</executable>
                 </configuration>
                 <executions>
                     <execution>
@@ -166,6 +180,10 @@
                             <mainClass>com.albumorganizer.AlbumOrganizerApp</mainClass>
                             <options>
                                 <option>-Dapple.awt.application.name=AlbumOrganizer</option>
+                                <!-- Prevent the plugin extracting wrong-arch natives from the
+                                     unclassified jar; the classified (mac-aarch64) jar on the
+                                     module path already contains the correct dylibs. -->
+                                <option>-Djavafx.platform=mac</option>
                             </options>
                         </configuration>
                     </execution>
@@ -195,6 +213,28 @@
                 </configuration>
             </plugin>
 
+            <!-- Wipe target/lib before each package so stale jars do not accumulate -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-clean-plugin</artifactId>
+                <version>3.4.1</version>
+                <executions>
+                    <execution>
+                        <id>clean-lib</id>
+                        <phase>prepare-package</phase>
+                        <goals><goal>clean</goal></goals>
+                        <configuration>
+                            <excludeDefaultDirectories>true</excludeDefaultDirectories>
+                            <filesets>
+                                <fileset>
+                                    <directory>${project.build.directory}/lib</directory>
+                                </fileset>
+                            </filesets>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
             <!-- Maven Dependency Plugin (copy dependencies) -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -210,6 +250,23 @@
                         <configuration>
                             <outputDirectory>${project.build.directory}/lib</outputDirectory>
                             <includeScope>runtime</includeScope>
+                            <excludeGroupIds>org.openjfx</excludeGroupIds>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>copy-javafx-natives</id>
+                        <phase>package</phase>
+                        <goals><goal>copy</goal></goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/lib</outputDirectory>
+                            <stripVersion>false</stripVersion>
+                            <artifactItems>
+                                <artifactItem><groupId>org.openjfx</groupId><artifactId>javafx-base</artifactId>     <version>${javafx.version}</version><classifier>${javafx.classifier}</classifier><type>jar</type></artifactItem>
+                                <artifactItem><groupId>org.openjfx</groupId><artifactId>javafx-graphics</artifactId><version>${javafx.version}</version><classifier>${javafx.classifier}</classifier><type>jar</type></artifactItem>
+                                <artifactItem><groupId>org.openjfx</groupId><artifactId>javafx-controls</artifactId><version>${javafx.version}</version><classifier>${javafx.classifier}</classifier><type>jar</type></artifactItem>
+                                <artifactItem><groupId>org.openjfx</groupId><artifactId>javafx-fxml</artifactId>    <version>${javafx.version}</version><classifier>${javafx.classifier}</classifier><type>jar</type></artifactItem>
+                                <artifactItem><groupId>org.openjfx</groupId><artifactId>javafx-swing</artifactId>   <version>${javafx.version}</version><classifier>${javafx.classifier}</classifier><type>jar</type></artifactItem>
+                            </artifactItems>
                         </configuration>
                     </execution>
                 </executions>
@@ -250,83 +307,59 @@
     </pluginRepositories>
 
     <profiles>
-        <!-- Activated automatically on Windows: pulls JavaFX jars with Windows natives -->
+        <!-- Windows: JavaFX jars with Win64 natives -->
         <profile>
             <id>javafx-windows</id>
-            <activation>
-                <os><family>windows</family></os>
-            </activation>
+            <activation><os><family>windows</family></os></activation>
+            <properties><javafx.classifier>win</javafx.classifier></properties>
             <dependencies>
-                <dependency>
-                    <groupId>org.openjfx</groupId>
-                    <artifactId>javafx-controls</artifactId>
-                    <version>${javafx.version}</version>
-                    <classifier>win</classifier>
-                </dependency>
-                <dependency>
-                    <groupId>org.openjfx</groupId>
-                    <artifactId>javafx-fxml</artifactId>
-                    <version>${javafx.version}</version>
-                    <classifier>win</classifier>
-                </dependency>
-                <dependency>
-                    <groupId>org.openjfx</groupId>
-                    <artifactId>javafx-swing</artifactId>
-                    <version>${javafx.version}</version>
-                    <classifier>win</classifier>
-                </dependency>
-                <dependency>
-                    <groupId>org.openjfx</groupId>
-                    <artifactId>javafx-graphics</artifactId>
-                    <version>${javafx.version}</version>
-                    <classifier>win</classifier>
-                </dependency>
-                <dependency>
-                    <groupId>org.openjfx</groupId>
-                    <artifactId>javafx-base</artifactId>
-                    <version>${javafx.version}</version>
-                    <classifier>win</classifier>
-                </dependency>
+                <dependency><groupId>org.openjfx</groupId><artifactId>javafx-base</artifactId>        <version>${javafx.version}</version><classifier>win</classifier></dependency>
+                <dependency><groupId>org.openjfx</groupId><artifactId>javafx-graphics</artifactId>    <version>${javafx.version}</version><classifier>win</classifier></dependency>
+                <dependency><groupId>org.openjfx</groupId><artifactId>javafx-controls</artifactId>   <version>${javafx.version}</version><classifier>win</classifier></dependency>
+                <dependency><groupId>org.openjfx</groupId><artifactId>javafx-fxml</artifactId>       <version>${javafx.version}</version><classifier>win</classifier></dependency>
+                <dependency><groupId>org.openjfx</groupId><artifactId>javafx-swing</artifactId>      <version>${javafx.version}</version><classifier>win</classifier></dependency>
             </dependencies>
         </profile>
 
-        <!-- Activated automatically on macOS: pulls JavaFX jars with macOS natives -->
+        <!-- macOS Intel: activate explicitly with -P javafx-mac when building on x86_64 Mac.
+             Not auto-activated; aarch64 Macs use javafx-mac-aarch64 below. -->
         <profile>
             <id>javafx-mac</id>
-            <activation>
-                <os><family>mac</family></os>
-            </activation>
+            <properties><javafx.classifier>mac</javafx.classifier></properties>
             <dependencies>
-                <dependency>
-                    <groupId>org.openjfx</groupId>
-                    <artifactId>javafx-controls</artifactId>
-                    <version>${javafx.version}</version>
-                    <classifier>mac</classifier>
-                </dependency>
-                <dependency>
-                    <groupId>org.openjfx</groupId>
-                    <artifactId>javafx-fxml</artifactId>
-                    <version>${javafx.version}</version>
-                    <classifier>mac</classifier>
-                </dependency>
-                <dependency>
-                    <groupId>org.openjfx</groupId>
-                    <artifactId>javafx-swing</artifactId>
-                    <version>${javafx.version}</version>
-                    <classifier>mac</classifier>
-                </dependency>
-                <dependency>
-                    <groupId>org.openjfx</groupId>
-                    <artifactId>javafx-graphics</artifactId>
-                    <version>${javafx.version}</version>
-                    <classifier>mac</classifier>
-                </dependency>
-                <dependency>
-                    <groupId>org.openjfx</groupId>
-                    <artifactId>javafx-base</artifactId>
-                    <version>${javafx.version}</version>
-                    <classifier>mac</classifier>
-                </dependency>
+                <dependency><groupId>org.openjfx</groupId><artifactId>javafx-base</artifactId>        <version>${javafx.version}</version><classifier>mac</classifier></dependency>
+                <dependency><groupId>org.openjfx</groupId><artifactId>javafx-graphics</artifactId>    <version>${javafx.version}</version><classifier>mac</classifier></dependency>
+                <dependency><groupId>org.openjfx</groupId><artifactId>javafx-controls</artifactId>   <version>${javafx.version}</version><classifier>mac</classifier></dependency>
+                <dependency><groupId>org.openjfx</groupId><artifactId>javafx-fxml</artifactId>       <version>${javafx.version}</version><classifier>mac</classifier></dependency>
+                <dependency><groupId>org.openjfx</groupId><artifactId>javafx-swing</artifactId>      <version>${javafx.version}</version><classifier>mac</classifier></dependency>
+            </dependencies>
+        </profile>
+
+        <!-- macOS Apple Silicon: JavaFX jars with mac-aarch64 natives -->
+        <profile>
+            <id>javafx-mac-aarch64</id>
+            <activation><os><family>mac</family><arch>aarch64</arch></os></activation>
+            <properties><javafx.classifier>mac-aarch64</javafx.classifier></properties>
+            <dependencies>
+                <dependency><groupId>org.openjfx</groupId><artifactId>javafx-base</artifactId>        <version>${javafx.version}</version><classifier>mac-aarch64</classifier></dependency>
+                <dependency><groupId>org.openjfx</groupId><artifactId>javafx-graphics</artifactId>    <version>${javafx.version}</version><classifier>mac-aarch64</classifier></dependency>
+                <dependency><groupId>org.openjfx</groupId><artifactId>javafx-controls</artifactId>   <version>${javafx.version}</version><classifier>mac-aarch64</classifier></dependency>
+                <dependency><groupId>org.openjfx</groupId><artifactId>javafx-fxml</artifactId>       <version>${javafx.version}</version><classifier>mac-aarch64</classifier></dependency>
+                <dependency><groupId>org.openjfx</groupId><artifactId>javafx-swing</artifactId>      <version>${javafx.version}</version><classifier>mac-aarch64</classifier></dependency>
+            </dependencies>
+        </profile>
+
+        <!-- Linux: JavaFX jars with linux natives -->
+        <profile>
+            <id>javafx-linux</id>
+            <activation><os><name>Linux</name></os></activation>
+            <properties><javafx.classifier>linux</javafx.classifier></properties>
+            <dependencies>
+                <dependency><groupId>org.openjfx</groupId><artifactId>javafx-base</artifactId>        <version>${javafx.version}</version><classifier>linux</classifier></dependency>
+                <dependency><groupId>org.openjfx</groupId><artifactId>javafx-graphics</artifactId>    <version>${javafx.version}</version><classifier>linux</classifier></dependency>
+                <dependency><groupId>org.openjfx</groupId><artifactId>javafx-controls</artifactId>   <version>${javafx.version}</version><classifier>linux</classifier></dependency>
+                <dependency><groupId>org.openjfx</groupId><artifactId>javafx-fxml</artifactId>       <version>${javafx.version}</version><classifier>linux</classifier></dependency>
+                <dependency><groupId>org.openjfx</groupId><artifactId>javafx-swing</artifactId>      <version>${javafx.version}</version><classifier>linux</classifier></dependency>
             </dependencies>
         </profile>
     </profiles>

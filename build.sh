@@ -128,8 +128,16 @@ echo "----------------------------------------------------------------------"
 echo ""
 
 # --- Build -------------------------------------------------------------------
+# Select the right JavaFX native profile based on CPU architecture
+ARCH=$(uname -m)
+if [ "$ARCH" = "arm64" ]; then
+    MVN_PROFILE="-P javafx-mac-aarch64"
+else
+    MVN_PROFILE="-P javafx-mac"
+fi
+
 echo "Building JAR..."
-mvn package -DskipTests -q
+mvn package -DskipTests -q $MVN_PROFILE
 
 echo "Building icons..."
 ICONSET="target/app-icon.iconset"
