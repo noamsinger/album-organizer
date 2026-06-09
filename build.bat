@@ -190,7 +190,12 @@ echo.
 :: --- Build -------------------------------------------------------------------
 echo Building JAR...
 echo [..] Downloading dependencies (first build downloads ~200 MB -- this may take a few minutes)...
-call "!MVN_CMD!" package -DskipTests
+:: Delete any partial downloads left by a previous failed attempt
+if exist "%USERPROFILE%\.m2\repository\com\microsoft\onnxruntime" (
+    del /s /q "%USERPROFILE%\.m2\repository\com\microsoft\onnxruntime\*.part" >NUL 2>&1
+    del /s /q "%USERPROFILE%\.m2\repository\com\microsoft\onnxruntime\*.lastUpdated" >NUL 2>&1
+)
+call "!MVN_CMD!" package -DskipTests -Dmaven.wagon.http.retryHandler.count=5 -Dmaven.wagon.httpconnectionManager.ttlSeconds=120 -Dmaven.artifact.threads=1
 if errorlevel 1 goto error
 
 echo Building Windows app bundle...
