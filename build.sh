@@ -2,24 +2,23 @@
 set -e
 cd "$(dirname "$0")"
 
-# ── Colors ───────────────────────────────────────────────────────────────────
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
-ok()   { echo -e "${GREEN}✔ $1${NC}"; }
-warn() { echo -e "${YELLOW}⚠ $1${NC}"; }
-info() { echo -e "  $1"; }
+ok()   { echo -e "${GREEN}[OK]  $1${NC}"; }
+warn() { echo -e "${YELLOW}[!!]  $1${NC}"; }
+fail() { echo -e "${RED}[XX]  $1${NC}"; }
+info() { echo "      $1"; }
 
-echo "══════════════════════════════════════════════════════"
-echo "  Album Organizer — macOS build"
-echo "══════════════════════════════════════════════════════"
+echo "======================================================"
+echo "  Album Organizer -- macOS build"
+echo "======================================================"
 echo ""
 echo "Checking build prerequisites..."
 echo ""
 
-# ── Homebrew ─────────────────────────────────────────────────────────────────
+# --- Homebrew -----------------------------------------------------------------
 if ! command -v brew &>/dev/null; then
-    warn "Homebrew not found — installing..."
+    warn "Homebrew not found -- installing..."
     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-    # Add brew to PATH for Apple Silicon
     if [ -f /opt/homebrew/bin/brew ]; then
         eval "$(/opt/homebrew/bin/brew shellenv)"
     fi
@@ -27,38 +26,36 @@ else
     ok "Homebrew $(brew --version | head -1 | awk '{print $2}')"
 fi
 
-# ── Java 21 (Temurin) ────────────────────────────────────────────────────────
+# --- Java 21 (Temurin) -------------------------------------------------------
 JAVA_VER=$(java -version 2>&1 | awk -F'"' '/version/{print $2}' | cut -d. -f1)
 if [ -z "$JAVA_VER" ] || [ "$JAVA_VER" -lt 17 ]; then
-    warn "Java 17+ not found — installing Temurin 21..."
+    warn "Java 17+ not found -- installing Temurin 21..."
     brew install --cask temurin@21
     export JAVA_HOME="$(/usr/libexec/java_home -v 21 2>/dev/null || /usr/libexec/java_home)"
 else
     ok "Java $JAVA_VER ($(java -version 2>&1 | head -1))"
 fi
 
-# Ensure JAVA_HOME is set to a JDK (needed for jpackage)
 if [ -z "$JAVA_HOME" ]; then
     export JAVA_HOME="$(/usr/libexec/java_home 2>/dev/null)"
 fi
 
-# ── Maven ────────────────────────────────────────────────────────────────────
+# --- Maven -------------------------------------------------------------------
 if ! command -v mvn &>/dev/null; then
-    warn "Maven not found — installing..."
+    warn "Maven not found -- installing..."
     brew install maven
 else
     ok "Maven $(mvn --version 2>&1 | head -1 | awk '{print $3}')"
 fi
 
-# ── jpackage (bundled with JDK 14+) ─────────────────────────────────────────
+# --- jpackage (bundled with JDK 14+) -----------------------------------------
 if ! command -v jpackage &>/dev/null; then
-    # Try to locate it under JAVA_HOME
     JP="$JAVA_HOME/bin/jpackage"
     if [ -x "$JP" ]; then
         export PATH="$JAVA_HOME/bin:$PATH"
         ok "jpackage (via JAVA_HOME)"
     else
-        echo -e "${RED}✖ jpackage not found.${NC}"
+        fail "jpackage not found."
         info "Make sure JAVA_HOME points to a JDK 17+ installation."
         info "  brew install --cask temurin@21"
         exit 1
@@ -67,33 +64,33 @@ else
     ok "jpackage"
 fi
 
-# ── sips + iconutil (built in to macOS) ─────────────────────────────────────
+# --- sips + iconutil (macOS built-in) ----------------------------------------
 if ! command -v sips &>/dev/null || ! command -v iconutil &>/dev/null; then
-    echo -e "${RED}✖ sips/iconutil not found.${NC} These are built into macOS — are you on macOS?"
+    fail "sips/iconutil not found. These are built into macOS -- are you on macOS?"
     exit 1
 else
     ok "sips + iconutil (macOS built-in)"
 fi
 
-# ── Python 3 (optional — needed for ComfyUI, Stable Diffusion, InvokeAI) ────
+# --- Python 3 (optional -- needed for ComfyUI, Stable Diffusion, InvokeAI) --
 if ! command -v python3 &>/dev/null; then
-    warn "Python 3 not found — installing (needed to run local AI servers)..."
+    warn "Python 3 not found -- installing (needed to run local AI servers)..."
     brew install python
 else
     ok "Python $(python3 --version 2>&1 | awk '{print $2}') (optional: local AI servers)"
 fi
 
-# ── Git (optional — needed to clone local AI servers) ───────────────────────
+# --- Git (optional -- needed to clone local AI servers) ----------------------
 if ! command -v git &>/dev/null; then
-    warn "Git not found — installing (needed to clone local AI servers)..."
+    warn "Git not found -- installing (needed to clone local AI servers)..."
     brew install git
 else
     ok "Git $(git --version | awk '{print $3}') (optional: local AI servers)"
 fi
 
-# ── curl (usually present, needed by ComfyUI API + build) ───────────────────
+# --- curl (needed by Homebrew install + ComfyUI API) -------------------------
 if ! command -v curl &>/dev/null; then
-    warn "curl not found — installing..."
+    warn "curl not found -- installing..."
     brew install curl
 else
     ok "curl $(curl --version | head -1 | awk '{print $2}')"
@@ -103,33 +100,34 @@ echo ""
 echo "All build prerequisites satisfied."
 echo ""
 
-# ── Optional AI tool guidance ────────────────────────────────────────────────
-echo "── Optional: Local AI servers ───────────────────────────────────────────"
-echo "  The app supports several local AI providers. They are NOT required to"
-echo "  build or run — enable them individually in Settings → AI Enhancement."
+# --- Optional AI tool guidance -----------------------------------------------
+echo "----------------------------------------------------------------------"
+echo "  Optional: Local AI servers"
+echo "  Not required to build or run -- enable in Settings -> AI Enhancement"
+echo "----------------------------------------------------------------------"
 echo ""
 echo "  ComfyUI (image + video, localhost:8188):"
-info "  git clone https://github.com/comfyanonymous/ComfyUI && cd ComfyUI"
-info "  python3 -m venv venv && source venv/bin/activate"
-info "  pip install -r requirements.txt"
-info "  python main.py --listen"
-info "  # Video support: cd custom_nodes && git clone https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite"
+info "git clone https://github.com/comfyanonymous/ComfyUI && cd ComfyUI"
+info "python3 -m venv venv && source venv/bin/activate"
+info "pip install -r requirements.txt"
+info "python main.py --listen"
+info "Video support: cd custom_nodes && git clone https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite"
 echo ""
 echo "  Stable Diffusion WebUI (image, localhost:7860):"
-info "  git clone https://github.com/AUTOMATIC1111/stable-diffusion-webui"
-info "  cd stable-diffusion-webui && ./webui.sh --api"
+info "git clone https://github.com/AUTOMATIC1111/stable-diffusion-webui"
+info "cd stable-diffusion-webui && ./webui.sh --api"
 echo ""
 echo "  InvokeAI (image, localhost:9090):"
-info "  pip install invokeai && invokeai-web"
+info "pip install invokeai && invokeai-web"
 echo ""
 echo "  Real-ESRGAN (image upscale, no GPU needed):"
-info "  mkdir -p ~/.config/album-organizer/models"
-info "  curl -L -o ~/.config/album-organizer/models/RealESRGAN_x4plus.onnx \\"
-info "    https://github.com/xinntao/Real-ESRGAN/releases/latest/download/RealESRGAN_x4plus.onnx"
-echo "─────────────────────────────────────────────────────────────────────────"
+info "mkdir -p ~/.config/album-organizer/models"
+info "curl -L -o ~/.config/album-organizer/models/RealESRGAN_x4plus.onnx \\"
+info "  https://github.com/xinntao/Real-ESRGAN/releases/latest/download/RealESRGAN_x4plus.onnx"
+echo "----------------------------------------------------------------------"
 echo ""
 
-# ── Build ────────────────────────────────────────────────────────────────────
+# --- Build -------------------------------------------------------------------
 echo "Building JAR..."
 mvn package -DskipTests -q
 
