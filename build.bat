@@ -36,8 +36,6 @@ if %JAVA_OK%==0 (
 )
 
 :: --- Maven -------------------------------------------------------------------
-:: Search PATH first, then common install roots including winget package cache.
-:: MVN_CMD will hold the full path to mvn.cmd (no surrounding quotes).
 call :find_on_path mvn MVN_CMD
 if not defined MVN_CMD call :find_file_recursive "%ProgramFiles%"                              "mvn.cmd" MVN_CMD
 if not defined MVN_CMD call :find_file_recursive "%ProgramFiles(x86)%"                        "mvn.cmd" MVN_CMD
@@ -62,14 +60,10 @@ if not defined MVN_CMD (
         exit /b 0
     )
 )
-:: Add its directory to PATH for this session if not already present
 for %%F in ("!MVN_CMD!") do set "MVN_BIN=%%~dpF"
-:: strip trailing backslash
 if "!MVN_BIN:~-1!"=="\" set "MVN_BIN=!MVN_BIN:~0,-1!"
-echo "!PATH!" | findstr /i /c:"!MVN_BIN!" >NUL 2>&1
-if errorlevel 1 set "PATH=!MVN_BIN!;!PATH!"
-call "!MVN_CMD!" --version 2>&1 | findstr /i "Apache Maven" > NUL
-echo [OK]  Maven (at !MVN_CMD!)
+set "PATH=!MVN_BIN!;!PATH!"
+echo [OK]  Maven
 
 :: --- jpackage (bundled with JDK 14+) -----------------------------------------
 call :find_on_path jpackage JP_CMD
@@ -91,10 +85,9 @@ if not defined JP_CMD (
 )
 for %%F in ("!JP_CMD!") do set "JP_BIN=%%~dpF"
 if "!JP_BIN:~-1!"=="\" set "JP_BIN=!JP_BIN:~0,-1!"
-echo "!PATH!" | findstr /i /c:"!JP_BIN!" >NUL 2>&1
-if errorlevel 1 set "PATH=!JP_BIN!;!PATH!"
+set "PATH=!JP_BIN!;!PATH!"
 if not defined JAVA_HOME set "JAVA_HOME=!JP_BIN!\.."
-echo [OK]  jpackage (at !JP_CMD!)
+echo [OK]  jpackage
 
 :: --- WiX Toolset (required for .msi installer) --------------------------------
 call :find_on_path candle WIX_CMD
@@ -122,8 +115,7 @@ if not defined WIX_CMD (
 if defined WIX_CMD (
     for %%F in ("!WIX_CMD!") do set "WIX_BIN=%%~dpF"
     if "!WIX_BIN:~-1!"=="\" set "WIX_BIN=!WIX_BIN:~0,-1!"
-    echo "!PATH!" | findstr /i /c:"!WIX_BIN!" >NUL 2>&1
-    if errorlevel 1 set "PATH=!WIX_BIN!;!PATH!"
+    set "PATH=!WIX_BIN!;!PATH!"
     echo [OK]  WiX Toolset
 )
 
@@ -253,7 +245,7 @@ goto :eof
 :: ============================================================
 :: Subroutine: find_file_recursive <root> <filename> <result_var>
 ::   Recursively searches <root> for <filename>.
-::   Sets result_var to the first match found (no surrounding quotes).
+::   Sets result_var to the first match (no surrounding quotes).
 ::   Does nothing if <root> does not exist or result_var already set.
 :: ============================================================
 :find_file_recursive
