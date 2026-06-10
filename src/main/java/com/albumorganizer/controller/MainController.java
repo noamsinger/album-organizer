@@ -208,16 +208,7 @@ public class MainController {
             logger.info("Running startup quick scan on {} album folders", baseFolders.size());
             Platform.runLater(() -> startStartupQuickScan());
         } else {
-            // Even with no album folders, still scan the special folders
-            boolean hasSpecialFolders = java.util.stream.Stream.of(
-                    settings.getTargetFolder(), settings.getAiGeneratedFolder(), settings.getRecycleBinFolder())
-                .anyMatch(p -> p != null && java.nio.file.Files.isDirectory(p));
-            if (hasSpecialFolders) {
-                logger.info("No album folders, but special folders exist — running startup quick scan");
-                Platform.runLater(() -> startStartupQuickScan());
-            } else {
-                Platform.runLater(() -> showFirstRunDialog());
-            }
+            Platform.runLater(() -> showFirstRunDialog());
         }
 
         // Restore view mode from settings
@@ -2968,13 +2959,13 @@ public class MainController {
                         }
                         return null;
                     }
-                    // Try loading directly via JavaFX; fall back to sips if it fails (e.g. wrong extension)
+                    // Try loading directly via JavaFX; fall back if it fails (e.g. wrong extension)
                     String fileUri = mediaFile.getAbsolutePath().toUri().toString();
-                    Image direct = new Image(fileUri, 160, 160, true, true, true);
+                    Image direct = new Image(fileUri, 160, 160, true, true, false);
                     if (!direct.isError() && direct.getWidth() > 0) {
                         return direct;
                     }
-                    // Fallback: convert via sips (handles wrong-extension files like WebP named .jpg)
+                    // Fallback: generate thumbnail using cache/ImageIO (handles wrong-extension files)
                     return thumbnailService.generateThumbnail(
                             mediaFile.getAbsolutePath(), mediaFile.getType());
                 } catch (Exception e) {
@@ -3244,16 +3235,15 @@ public class MainController {
             boolean success = moveToBin(duplicatePath, binFolder);
             if (success) {
                 successCount++;
-                // Remove from fileIndex
-                List<FileIndexEntry> indexEntries = fileIndex.get(hash);
-                if (indexEntries != null) {
-                    indexEntries.removeIf(entry -> entry.getAbsolutePath().equals(duplicatePath));
-                    if (indexEntries.isEmpty()) {
-                        fileIndex.remove(hash);
-                    }
-                }
-                // Remove from currentDisplayedFiles if present
-                currentDisplayedFiles.removeIf(file -> file.getAbsolutePath().equals(duplicatePath));
+                // Remove from fileIndex exhaustively and save snapshot
+                removeFileFromIndex(duplicatePath);
+
+                // Remove from currentDisplayedFiles using case-insensitive normalized comparison
+                currentDisplayedFiles.removeIf(file -> {
+                    Path fileAbs = file.getAbsolutePath().normalize().toAbsolutePath();
+                    Path dupAbs = duplicatePath.normalize().toAbsolutePath();
+                    return fileAbs.toString().equalsIgnoreCase(dupAbs.toString());
+                });
             } else {
                 failCount++;
                 failedFiles.add(duplicatePath.getFileName().toString());
@@ -3368,17 +3358,15 @@ public class MainController {
                             moved++;
                             final String name = p.getFileName().toString();
                             final int m = moved;
-                            Platform.runLater(() -> logProgress("✓ Moved: " + name + " (" + m + " so far)"));
-                            // Remove from fileIndex on FX thread
-                            final String hash = entry.getKey();
-                            final Path removed = p;
                             Platform.runLater(() -> {
-                                List<FileIndexEntry> idx = fileIndex.get(hash);
-                                if (idx != null) {
-                                    idx.removeIf(fe -> fe.getAbsolutePath().equals(removed));
-                                    if (idx.isEmpty()) fileIndex.remove(hash);
-                                }
-                                currentDisplayedFiles.removeIf(f -> f.getAbsolutePath().equals(removed));
+                                logProgress("✓ Moved: " + name + " (" + m + " so far)");
+                                final Path removed = p;
+                                removeFileFromIndex(removed);
+                                currentDisplayedFiles.removeIf(f -> {
+                                    Path fAbs = f.getAbsolutePath().normalize().toAbsolutePath();
+                                    Path remAbs = removed.normalize().toAbsolutePath();
+                                    return fAbs.toString().equalsIgnoreCase(remAbs.toString());
+                                });
                             });
                         } else {
                             failed++;
@@ -3429,6 +3417,21 @@ public class MainController {
         new Thread(task, "remove-duplicates-subtree").start();
     }
 
+    private void removeFileFromIndex(Path filePath) {
+        if (filePath == null) return;
+        Path normalizedPath = filePath.normalize().toAbsolutePath();
+        String pathStr = normalizedPath.toString();
+
+        fileIndex.values().forEach(entries ->
+            entries.removeIf(entry -> {
+                Path entryPath = entry.getAbsolutePath().normalize().toAbsolutePath();
+                return entryPath.toString().equalsIgnoreCase(pathStr);
+            })
+        );
+        fileIndex.entrySet().removeIf(entry -> entry.getValue().isEmpty());
+        snapshotRepository.saveSnapshot(fileIndex);
+    }
+
     private void deleteFile(MediaFile mediaFile) {
         if (mediaFile == null) return;
 
@@ -3455,15 +3458,16 @@ public class MainController {
 
         Path filePath = mediaFile.getAbsolutePath();
         if (moveToBin(filePath, binFolder)) {
-            // Remove from file index (hashed and unhashed buckets)
-            String hash = mediaFile.getSha1Hash();
-            String key = (hash != null && !hash.isEmpty()) ? hash : NO_HASH_KEY;
-            List<FileIndexEntry> entries = fileIndex.get(key);
-            if (entries != null) {
-                entries.removeIf(e -> e.getAbsolutePath().equals(filePath));
-                if (entries.isEmpty()) fileIndex.remove(key);
-            }
-            currentDisplayedFiles.remove(mediaFile);
+            // Remove from file index exhaustively and save snapshot
+            removeFileFromIndex(filePath);
+            
+            // Remove from currentDisplayedFiles using case-insensitive normalized comparison
+            currentDisplayedFiles.removeIf(file -> {
+                Path fileAbs = file.getAbsolutePath().normalize().toAbsolutePath();
+                Path filePathAbs = filePath.normalize().toAbsolutePath();
+                return fileAbs.toString().equalsIgnoreCase(filePathAbs.toString());
+            });
+
             refreshCurrentView();
             updateFileCount(currentDisplayedFiles.size());
             highlightDuplicates();
@@ -3698,6 +3702,7 @@ public class MainController {
                 int skipped = 0;
                 int failed = 0;
                 List<String> errors = new ArrayList<>();
+                List<Path> organizedPaths = new ArrayList<>();
 
                 // Create report writer
                 try {
@@ -3705,7 +3710,7 @@ public class MainController {
                 } catch (IOException e) {
                     logger.error("Failed to create report writer", e);
                     return new OrganizeRecursiveResult(0, 0, 0, 0,
-                        List.of("Failed to create report: " + e.getMessage()));
+                        List.of("Failed to create report: " + e.getMessage()), List.of());
                 }
 
                 // Collect files to organize from fileIndex (no disk walk needed)
@@ -3723,7 +3728,7 @@ public class MainController {
                     for (Path dir : indexedDirs) {
                         if (isCancelled()) {
                             reportWriter.close();
-                            return new OrganizeRecursiveResult(0, 0, 0, 0, errors);
+                            return new OrganizeRecursiveResult(0, 0, 0, 0, errors, List.of());
                         }
 
                         reportWriter.logDirectoryStart(dir);
@@ -3749,7 +3754,7 @@ public class MainController {
                         reportWriter.close();
                     }
                     return new OrganizeRecursiveResult(0, 0, 0, 0,
-                        List.of("Failed to collect files: " + e.getMessage()));
+                        List.of("Failed to collect files: " + e.getMessage()), List.of());
                 }
 
                 int totalFiles = filesToOrganize.size();
@@ -3780,6 +3785,7 @@ public class MainController {
                             succeeded++;
                             logProgress("Moved: " + mediaFile.getFilename() + " ; at " + dir);
                             reportWriter.logSuccess(mediaFile, sourcePath, result.getTargetPath());
+                            organizedPaths.add(sourcePath);
                         } else if (result.isSkipped()) {
                             skipped++;
                             logProgress("Skipped: " + mediaFile.getFilename() + " ; at " + dir + " — " + result.getErrorMessage());
@@ -3816,7 +3822,7 @@ public class MainController {
                     logger.error("Failed to compress report", e);
                 }
 
-                return new OrganizeRecursiveResult(processed, succeeded, skipped, failed, errors);
+                return new OrganizeRecursiveResult(processed, succeeded, skipped, failed, errors, organizedPaths);
             }
         };
 
@@ -3839,6 +3845,23 @@ public class MainController {
                 progressBar.progressProperty().unbind();
                 progressBar.setVisible(false);
                 progressBar.setManaged(false);
+
+                // Remove successfully organized files from fileIndex and currentDisplayedFiles
+                if (result.organizedPaths != null) {
+                    for (Path organizedPath : result.organizedPaths) {
+                        removeFileFromIndex(organizedPath);
+                        currentDisplayedFiles.removeIf(f -> {
+                            Path fAbs = f.getAbsolutePath().normalize().toAbsolutePath();
+                            Path orgAbs = organizedPath.normalize().toAbsolutePath();
+                            return fAbs.toString().equalsIgnoreCase(orgAbs.toString());
+                        });
+                    }
+                }
+
+                refreshCurrentView();
+                updateFileCount(currentDisplayedFiles.size());
+                highlightDuplicates();
+                buildDirectoryTree();
 
                 String summary = String.format("Organize Complete: %d processed, %d succeeded, %d skipped, %d failed",
                     result.processed, result.succeeded, result.skipped, result.failed);
@@ -3911,13 +3934,15 @@ public class MainController {
         final int skipped;
         final int failed;
         final List<String> errors;
+        final List<Path> organizedPaths;
 
-        OrganizeRecursiveResult(int processed, int succeeded, int skipped, int failed, List<String> errors) {
+        OrganizeRecursiveResult(int processed, int succeeded, int skipped, int failed, List<String> errors, List<Path> organizedPaths) {
             this.processed = processed;
             this.succeeded = succeeded;
             this.skipped = skipped;
             this.failed = failed;
             this.errors = errors;
+            this.organizedPaths = organizedPaths;
         }
     }
 

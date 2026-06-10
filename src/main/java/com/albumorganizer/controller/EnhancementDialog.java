@@ -557,10 +557,11 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
         dialog.initOwner(getDialogPane().getScene().getWindow());
         dialog.setTitle(title);
         dialog.getDialogPane().getButtonTypes().add(ButtonType.CLOSE);
+        dialog.setResizable(true);
 
         Label friendlyLabel = new Label(message != null ? message : "An unexpected error occurred.");
         friendlyLabel.setWrapText(true);
-        friendlyLabel.setMaxWidth(520);
+        friendlyLabel.setMaxWidth(Double.MAX_VALUE);
         friendlyLabel.setStyle("-fx-font-size: 1.05em;");
 
         VBox content = new VBox(10, friendlyLabel);
@@ -570,16 +571,32 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
             TitledPane techPane = new TitledPane();
             techPane.setText("Technical details");
             techPane.setExpanded(false);
+            
             TextArea techArea = new TextArea(technicalDetail);
             techArea.setEditable(false);
             techArea.setWrapText(true);
             techArea.setPrefWidth(520);
-            techArea.setPrefHeight(140);
+            techArea.setPrefHeight(200);
+            techArea.setMaxHeight(Double.MAX_VALUE);
+            
             techPane.setContent(techArea);
+            techPane.setMaxHeight(Double.MAX_VALUE);
+            VBox.setVgrow(techPane, Priority.ALWAYS);
             content.getChildren().add(techPane);
+
+            // Auto-resize window when TitledPane is expanded/collapsed
+            techPane.expandedProperty().addListener((obs, wasExpanded, isNowExpanded) -> {
+                javafx.application.Platform.runLater(() -> {
+                    if (dialog.getDialogPane().getScene() != null && 
+                        dialog.getDialogPane().getScene().getWindow() != null) {
+                        dialog.getDialogPane().getScene().getWindow().sizeToScene();
+                    }
+                });
+            });
         }
 
         dialog.getDialogPane().setContent(content);
+        dialog.getDialogPane().setPrefWidth(560);
         dialog.showAndWait();
     }
 

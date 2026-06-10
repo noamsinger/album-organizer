@@ -6,7 +6,7 @@ mvn package -DskipTests -q
 
 FX_MODS=""
 for mod in controls fxml swing graphics base; do
-  jar=$(find ~/.m2/repository/org/openjfx/javafx-${mod}/21.0.1 -name "*mac-aarch64.jar" 2>/dev/null | head -1)
+  jar=$(find ~/.m2/repository/org/openjfx/javafx-${mod}/21.0.1 -name "*win.jar" 2>/dev/null | head -1)
   [ -n "$jar" ] && FX_MODS="$FX_MODS:$jar"
 done
 FX_MODS="${FX_MODS#:}"

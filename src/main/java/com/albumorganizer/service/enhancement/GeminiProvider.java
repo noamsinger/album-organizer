@@ -55,6 +55,20 @@ public class GeminiProvider implements EnhancementProvider {
             }
             """.formatted(escapeJson(prompt), mimeType, b64Image);
 
+        String cleanBody = """
+            {
+              "contents": [
+                {
+                  "parts": [
+                    { "text": "%s" },
+                    { "inlineData": { "mimeType": "%s", "data": "<BASE64_IMAGE_DATA_TRUNCATED>" } }
+                  ]
+                }
+              ],
+              "generationConfig": { "responseModalities": ["IMAGE", "TEXT"] }
+            }
+            """.formatted(escapeJson(prompt), mimeType);
+
         HttpRequest req = HttpRequest.newBuilder()
             .uri(URI.create(API_URL + "?key=" + apiKey))
             .header("Content-Type", "application/json")
@@ -80,14 +94,16 @@ public class GeminiProvider implements EnhancementProvider {
                     errMsg = err.has("message") ? err.get("message").getAsString() : err.toString();
                 }
             } catch (Exception ignored) {}
-            return EnhancementResult.failure("Gemini API error " + resp.statusCode() + ": " + errMsg);
+            String technicalDetail = "Request Sent:\n" + cleanBody + "\n\nResponse Received (HTTP " + resp.statusCode() + "):\n" + responseBody;
+            return EnhancementResult.failure("Gemini API error " + resp.statusCode() + ": " + errMsg, technicalDetail);
         }
 
         byte[] resultBytes = extractImageBytes(resp.body());
         if (resultBytes == null) {
             logger.error("Gemini response contained no image data. Body snippet: {}",
                 resp.body().length() > 500 ? resp.body().substring(0, 500) : resp.body());
-            return EnhancementResult.failure("Gemini response contained no image data");
+            String technicalDetail = "Request Sent:\n" + cleanBody + "\n\nResponse Received (HTTP " + resp.statusCode() + "):\n" + resp.body();
+            return EnhancementResult.failure("Gemini response contained no image data", technicalDetail);
         }
 
         Path outputPath = ImageUtils.saveAsJpeg(resultBytes, request.inputPath(), getShortId(), request.outputDir());

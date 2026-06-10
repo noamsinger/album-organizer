@@ -170,14 +170,14 @@
                 <artifactId>javafx-maven-plugin</artifactId>
                 <version>0.0.8</version>
                 <configuration>
-                    <mainClass>com.albumorganizer.AlbumOrganizerApp</mainClass>
+                    <mainClass>com.albumorganizer.Launcher</mainClass>
                     <executable>${java.home}/bin/java</executable>
                 </configuration>
                 <executions>
                     <execution>
                         <id>default-cli</id>
                         <configuration>
-                            <mainClass>com.albumorganizer.AlbumOrganizerApp</mainClass>
+                            <mainClass>com.albumorganizer.Launcher</mainClass>
                             <options>
                                 <option>-Dapple.awt.application.name=AlbumOrganizer</option>
                                 <!-- Prevent the plugin extracting wrong-arch natives from the
@@ -207,7 +207,7 @@
                     <archive>
                         <manifest>
                             <addClasspath>true</addClasspath>
-                            <mainClass>com.albumorganizer.AlbumOrganizerApp</mainClass>
+                            <mainClass>com.albumorganizer.Launcher</mainClass>
                         </manifest>
                     </archive>
                 </configuration>
@@ -283,7 +283,7 @@
                     <vendor>VibeCoded by Noam Singer</vendor>
                     <destination>target/dist</destination>
                     <mainJar>album-organizer-${project.version}.jar</mainJar>
-                    <mainClass>com.albumorganizer.AlbumOrganizerApp</mainClass>
+                    <mainClass>com.albumorganizer.Launcher</mainClass>
                     <input>target/lib</input>
                     <icon>${project.basedir}/src/main/resources/app-icon.png</icon>
                     <javaOptions>

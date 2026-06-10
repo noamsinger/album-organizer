@@ -59,6 +59,19 @@ public class GrokProvider implements EnhancementProvider {
         payload.addProperty("num_images", 1);
         payload.addProperty("response_format", "b64_json");
 
+        JsonObject cleanImageObj = new JsonObject();
+        cleanImageObj.addProperty("url", "data:image/jpeg;base64,<BASE64_IMAGE_DATA_TRUNCATED>");
+        cleanImageObj.addProperty("type", "image_url");
+
+        JsonObject cleanPayload = new JsonObject();
+        cleanPayload.addProperty("model", MODEL);
+        cleanPayload.addProperty("prompt", prompt);
+        cleanPayload.add("image", cleanImageObj);
+        cleanPayload.addProperty("num_images", 1);
+        cleanPayload.addProperty("response_format", "b64_json");
+
+        String cleanBody = gson.toJson(cleanPayload);
+
         logger.info("Calling Grok edits endpoint with model {}", MODEL);
 
         HttpRequest req = HttpRequest.newBuilder()
@@ -85,7 +98,8 @@ public class GrokProvider implements EnhancementProvider {
                 if (errJson.has("error")) errMsg = errJson.get("error").getAsString();
                 else if (errJson.has("message")) errMsg = errJson.get("message").getAsString();
             } catch (Exception ignored) {}
-            return EnhancementResult.failure("Grok API error " + resp.statusCode() + ": " + errMsg);
+            String technicalDetail = "Request Sent:\n" + cleanBody + "\n\nResponse Received (HTTP " + resp.statusCode() + "):\n" + resp.body();
+            return EnhancementResult.failure("Grok API error " + resp.statusCode() + ": " + errMsg, technicalDetail);
         }
 
         JsonObject json = gson.fromJson(resp.body(), JsonObject.class);

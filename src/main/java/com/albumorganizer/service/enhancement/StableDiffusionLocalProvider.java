@@ -73,12 +73,20 @@ public class StableDiffusionLocalProvider implements EnhancementProvider {
             .timeout(Duration.ofMinutes(10))
             .build();
 
+        JsonObject cleanPayload = payload.deepCopy();
+        JsonArray cleanInitImages = new JsonArray();
+        cleanInitImages.add("<BASE64_IMAGE_DATA_TRUNCATED>");
+        cleanPayload.add("init_images", cleanInitImages);
+        String cleanBody = gson.toJson(cleanPayload);
+
         try {
             HttpResponse<String> response = client.send(httpRequest, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() != 200) {
-                String msg = "SD WebUI returned HTTP " + response.statusCode() + ": " + response.body();
+                String respBody = response.body();
+                String msg = "SD WebUI returned HTTP " + response.statusCode() + ": " + respBody;
                 logger.error(msg);
-                return EnhancementResult.failure(msg);
+                String technicalDetail = "Request Sent:\n" + cleanBody + "\n\nResponse Received (HTTP " + response.statusCode() + "):\n" + respBody;
+                return EnhancementResult.failure("Stable Diffusion Local API error " + response.statusCode(), technicalDetail);
             }
             JsonObject json = gson.fromJson(response.body(), JsonObject.class);
             String b64Result = json.getAsJsonArray("images").get(0).getAsString();

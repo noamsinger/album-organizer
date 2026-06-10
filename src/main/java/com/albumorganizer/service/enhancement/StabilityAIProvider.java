@@ -71,12 +71,31 @@ public class StabilityAIProvider implements EnhancementProvider {
             .timeout(Duration.ofMinutes(5))
             .build();
 
+        String cleanBody = String.format(
+            "Content-Type: multipart/form-data; boundary=%s\n\n" +
+            "--%s\n" +
+            "Content-Disposition: form-data; name=\"image\"; filename=\"input.jpg\"\n" +
+            "Content-Type: image/jpeg\n\n" +
+            "<IMAGE DATA TRUNCATED>\n" +
+            "%s" +
+            "--%s\n" +
+            "Content-Disposition: form-data; name=\"output_format\"\n\n" +
+            "%s\n" +
+            "--%s--",
+            boundary, boundary,
+            (request.prompt() != null && !request.prompt().isBlank()) ? 
+                String.format("--%s\nContent-Disposition: form-data; name=\"prompt\"\n\n%s\n", boundary, request.prompt()) : "",
+            boundary, outputFormat, boundary
+        );
+
         try {
             HttpResponse<byte[]> response = client.send(httpRequest, HttpResponse.BodyHandlers.ofByteArray());
             if (response.statusCode() != 200) {
-                String msg = "Stability AI returned HTTP " + response.statusCode() + ": " + new String(response.body());
+                String responseBody = new String(response.body());
+                String msg = "Stability AI returned HTTP " + response.statusCode() + ": " + responseBody;
                 logger.error(msg);
-                return EnhancementResult.failure(msg);
+                String technicalDetail = "Request Sent:\n" + cleanBody + "\n\nResponse Received (HTTP " + response.statusCode() + "):\n" + responseBody;
+                return EnhancementResult.failure("Stability AI API error " + response.statusCode(), technicalDetail);
             }
             Path outputPath = writeOutput(request, response.body(), outputFormat);
             return EnhancementResult.ok(outputPath);

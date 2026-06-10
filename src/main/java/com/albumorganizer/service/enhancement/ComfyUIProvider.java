@@ -3,6 +3,7 @@ package com.albumorganizer.service.enhancement;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonElement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -14,6 +15,8 @@ import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -68,32 +71,38 @@ public class ComfyUIProvider implements EnhancementProvider {
         try {
             uploadedName = uploadFile(imageBytes, "image/jpeg",
                 request.inputPath().getFileName().toString(), "/upload/image");
+        } catch (ApiException e) {
+            return EnhancementResult.failure(e.getMessage(), e.getTechnicalDetail());
         } catch (java.net.ConnectException e) {
             return EnhancementResult.failure(
                 "Cannot reach ComfyUI at " + baseUrl + ". Make sure it is running.",
                 e.toString());
+        } catch (IOException e) {
+            return EnhancementResult.failure("ComfyUI upload failed", e.toString());
         }
-        if (uploadedName == null) return EnhancementResult.failure(
-            "ComfyUI rejected the image upload. Check the server logs.",
-            "HTTP non-200 from " + baseUrl + "/upload/image");
 
         String prompt = coalesce(request.prompt(), "enhance, high quality, detailed");
         int width  = request.targetSize() != null ? request.targetSize().width  : 1024;
         int height = request.targetSize() != null ? request.targetSize().height : 1024;
 
-        JsonObject workflow = buildImageWorkflow(uploadedName, prompt, width, height);
         HttpClient client = newClient();
+        List<String> checkpoints = fetchCheckpoints(client);
+        String ckptName = selectCheckpoint(checkpoints);
+        logger.info("Using ComfyUI checkpoint: {}", ckptName);
+
+        JsonObject workflow = buildImageWorkflow(uploadedName, prompt, width, height, ckptName);
         String promptId;
         try {
             promptId = queuePrompt(client, workflow, clientId);
+        } catch (ApiException e) {
+            return EnhancementResult.failure(e.getMessage(), e.getTechnicalDetail());
         } catch (java.net.ConnectException e) {
             return EnhancementResult.failure(
                 "Cannot reach ComfyUI at " + baseUrl + ". Make sure it is running.",
                 e.toString());
+        } catch (IOException e) {
+            return EnhancementResult.failure("ComfyUI prompt queue failed", e.toString());
         }
-        if (promptId == null) return EnhancementResult.failure(
-            "ComfyUI refused the workflow. A required node may be missing (e.g. the checkpoint model).",
-            "HTTP non-200 from " + baseUrl + "/prompt");
 
         byte[] result;
         try {
@@ -126,29 +135,35 @@ public class ComfyUIProvider implements EnhancementProvider {
         String uploadedName;
         try {
             uploadedName = uploadFile(videoBytes, "video/mp4", origFilename, "/upload/image");
+        } catch (ApiException e) {
+            return EnhancementResult.failure(e.getMessage(), e.getTechnicalDetail());
         } catch (java.net.ConnectException e) {
             return EnhancementResult.failure(
                 "Cannot reach ComfyUI at " + baseUrl + ". Make sure it is running.",
                 e.toString());
+        } catch (IOException e) {
+            return EnhancementResult.failure("ComfyUI upload failed", e.toString());
         }
-        if (uploadedName == null) return EnhancementResult.failure(
-            "ComfyUI rejected the video upload. Check the server logs.",
-            "HTTP non-200 from " + baseUrl + "/upload/image");
 
         String prompt = coalesce(request.prompt(), "enhance, high quality, detailed");
-        JsonObject workflow = buildVideoWorkflow(uploadedName, prompt);
         HttpClient client = newClient();
+        List<String> checkpoints = fetchCheckpoints(client);
+        String ckptName = selectCheckpoint(checkpoints);
+        logger.info("Using ComfyUI checkpoint for video: {}", ckptName);
+
+        JsonObject workflow = buildVideoWorkflow(uploadedName, prompt, ckptName);
         String promptId;
         try {
             promptId = queuePrompt(client, workflow, clientId);
+        } catch (ApiException e) {
+            return EnhancementResult.failure(e.getMessage(), e.getTechnicalDetail());
         } catch (java.net.ConnectException e) {
             return EnhancementResult.failure(
                 "Cannot reach ComfyUI at " + baseUrl + ". Make sure it is running.",
                 e.toString());
+        } catch (IOException e) {
+            return EnhancementResult.failure("ComfyUI prompt queue failed", e.toString());
         }
-        if (promptId == null) return EnhancementResult.failure(
-            "ComfyUI refused the video workflow. The ComfyUI-VideoHelperSuite (VHS) node may not be installed.",
-            "HTTP non-200 from " + baseUrl + "/prompt — install: https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite");
 
         byte[] result;
         try {
@@ -194,12 +209,22 @@ public class ComfyUIProvider implements EnhancementProvider {
             HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() != 200) {
                 logger.warn("ComfyUI upload failed HTTP {}: {}", resp.statusCode(), resp.body());
-                return null;
+                String cleanBodyStr = String.format(
+                    "POST %s%s\nContent-Type: multipart/form-data; boundary=%s\n\n" +
+                    "--%s\n" +
+                    "Content-Disposition: form-data; name=\"image\"; filename=\"%s\"\n" +
+                    "Content-Type: %s\n\n" +
+                    "<FILE DATA TRUNCATED>\n" +
+                    "--%s--",
+                    baseUrl, endpoint, boundary, boundary, filename, mimeType, boundary
+                );
+                String detail = "Request Sent:\n" + cleanBodyStr + "\n\nResponse Received (HTTP " + resp.statusCode() + "):\n" + resp.body();
+                throw new ApiException("ComfyUI rejected the file upload. Check the server logs.", detail);
             }
             return gson.fromJson(resp.body(), JsonObject.class).get("name").getAsString();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return null;
+            throw new IOException("Request interrupted");
         }
     }
 
@@ -210,22 +235,25 @@ public class ComfyUIProvider implements EnhancementProvider {
         payload.add("prompt", workflow);
         payload.addProperty("client_id", clientId);
 
+        String payloadStr = gson.toJson(payload);
+
         HttpRequest req = HttpRequest.newBuilder()
             .uri(URI.create(baseUrl + "/prompt"))
             .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
+            .POST(HttpRequest.BodyPublishers.ofString(payloadStr))
             .timeout(Duration.ofSeconds(30))
             .build();
         try {
             HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() != 200) {
                 logger.warn("ComfyUI queue error HTTP {}: {}", resp.statusCode(), resp.body());
-                return null;
+                String detail = "Request Sent:\n" + payloadStr + "\n\nResponse Received (HTTP " + resp.statusCode() + "):\n" + resp.body();
+                throw new ApiException("ComfyUI refused the workflow. A required node may be missing (e.g. the checkpoint model).", detail);
             }
             return gson.fromJson(resp.body(), JsonObject.class).get("prompt_id").getAsString();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return null;
+            throw new IOException("Request interrupted");
         }
     }
 
@@ -318,7 +346,7 @@ public class ComfyUIProvider implements EnhancementProvider {
 
     // ── Workflow builders ────────────────────────────────────────────────────
 
-    private JsonObject buildImageWorkflow(String imageName, String prompt, int width, int height) {
+    private JsonObject buildImageWorkflow(String imageName, String prompt, int width, int height, String ckptName) {
         JsonObject wf = new JsonObject();
 
         // Node 1 — LoadImage
@@ -338,7 +366,7 @@ public class ComfyUIProvider implements EnhancementProvider {
 
         // Node 4 — CheckpointLoaderSimple
         wf.add("4", node("CheckpointLoaderSimple",
-            inputs -> inputs.addProperty("ckpt_name", "v1-5-pruned-emaonly.ckpt")));
+            inputs -> inputs.addProperty("ckpt_name", ckptName)));
 
         // Node 5 — VAEEncode
         wf.add("5", node("VAEEncode", inputs -> {
@@ -389,7 +417,7 @@ public class ComfyUIProvider implements EnhancementProvider {
      *   7  VAEDecode
      *   8  VHS_VideoCombine      — reassemble frames into video
      */
-    private JsonObject buildVideoWorkflow(String videoName, String prompt) {
+    private JsonObject buildVideoWorkflow(String videoName, String prompt, String ckptName) {
         JsonObject wf = new JsonObject();
 
         // Node 1 — VHS_LoadVideo
@@ -406,7 +434,7 @@ public class ComfyUIProvider implements EnhancementProvider {
 
         // Node 2 — CheckpointLoaderSimple
         wf.add("2", node("CheckpointLoaderSimple",
-            inputs -> inputs.addProperty("ckpt_name", "v1-5-pruned-emaonly.ckpt")));
+            inputs -> inputs.addProperty("ckpt_name", ckptName)));
 
         // Node 3 — positive prompt
         wf.add("3", node("CLIPTextEncode", inputs -> {
@@ -485,5 +513,74 @@ public class ComfyUIProvider implements EnhancementProvider {
 
     private String coalesce(String value, String fallback) {
         return (value != null && !value.isBlank()) ? value : fallback;
+    }
+
+    private List<String> fetchCheckpoints(HttpClient client) {
+        List<String> list = new ArrayList<>();
+        try {
+            HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/object_info/CheckpointLoaderSimple"))
+                .GET().timeout(Duration.ofSeconds(10)).build();
+            HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() == 200) {
+                JsonObject root = gson.fromJson(resp.body(), JsonObject.class);
+                if (root != null && root.has("CheckpointLoaderSimple")) {
+                    JsonObject def = root.getAsJsonObject("CheckpointLoaderSimple");
+                    JsonObject input = def.getAsJsonObject("input");
+                    if (input != null && input.has("required")) {
+                        JsonObject reqObj = input.getAsJsonObject("required");
+                        if (reqObj != null && reqObj.has("ckpt_name")) {
+                            JsonArray ckptArr = reqObj.getAsJsonArray("ckpt_name");
+                            if (ckptArr != null && ckptArr.size() > 0) {
+                                JsonElement firstEl = ckptArr.get(0);
+                                if (firstEl.isJsonArray()) {
+                                    JsonArray names = firstEl.getAsJsonArray();
+                                    for (int i = 0; i < names.size(); i++) {
+                                        list.add(names.get(i).getAsString());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("Failed to fetch ComfyUI checkpoints: {}", e.getMessage());
+        }
+        return list;
+    }
+
+    private String selectCheckpoint(List<String> available) {
+        if (available == null || available.isEmpty()) {
+            return "v1-5-pruned-emaonly.ckpt";
+        }
+        for (String ckpt : available) {
+            if (ckpt.equalsIgnoreCase("v1-5-pruned-emaonly.ckpt")) {
+                return ckpt;
+            }
+        }
+        for (String ckpt : available) {
+            String lower = ckpt.toLowerCase();
+            if (lower.contains("v1-5") || lower.contains("sd15") || lower.contains("sd_1.5") 
+                || lower.contains("sd-v1-5") || lower.contains("v1.5") || (lower.contains("1.5") && !lower.contains("xl"))) {
+                return ckpt;
+            }
+        }
+        for (String ckpt : available) {
+            String lower = ckpt.toLowerCase();
+            if (lower.endsWith(".safetensors") || lower.endsWith(".ckpt")) {
+                return ckpt;
+            }
+        }
+        return available.get(0);
+    }
+
+    private static class ApiException extends IOException {
+        private final String technicalDetail;
+        public ApiException(String message, String technicalDetail) {
+            super(message);
+            this.technicalDetail = technicalDetail;
+        }
+        public String getTechnicalDetail() { return technicalDetail; }
     }
 }

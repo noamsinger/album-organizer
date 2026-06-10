@@ -74,6 +74,25 @@ public class OpenAIDalleProvider implements EnhancementProvider {
             .timeout(Duration.ofMinutes(5))
             .build();
 
+        String cleanBody = String.format(
+            "Content-Type: multipart/form-data; boundary=%s\n\n" +
+            "--%s\n" +
+            "Content-Disposition: form-data; name=\"image\"; filename=\"input.png\"\n" +
+            "Content-Type: image/png\n\n" +
+            "<PNG IMAGE DATA TRUNCATED>\n" +
+            "--%s\n" +
+            "Content-Disposition: form-data; name=\"prompt\"\n\n" +
+            "%s\n" +
+            "--%s\n" +
+            "Content-Disposition: form-data; name=\"size\"\n\n" +
+            "%s\n" +
+            "--%s\n" +
+            "Content-Disposition: form-data; name=\"response_format\"\n\n" +
+            "b64_json\n" +
+            "--%s--",
+            boundary, boundary, boundary, request.prompt() != null ? request.prompt() : "enhance this image", boundary, size, boundary, boundary
+        );
+
         try {
             HttpResponse<String> response = client.send(httpRequest, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() != 200) {
@@ -87,7 +106,8 @@ public class OpenAIDalleProvider implements EnhancementProvider {
                         errMsg = err.has("message") ? err.get("message").getAsString() : err.toString();
                     }
                 } catch (Exception ignored) {}
-                return EnhancementResult.failure("OpenAI error " + response.statusCode() + ": " + errMsg);
+                String technicalDetail = "Request Sent:\n" + cleanBody + "\n\nResponse Received (HTTP " + response.statusCode() + "):\n" + respBody;
+                return EnhancementResult.failure("OpenAI error " + response.statusCode() + ": " + errMsg, technicalDetail);
             }
             JsonObject json = gson.fromJson(response.body(), JsonObject.class);
             String b64 = json.getAsJsonArray("data").get(0).getAsJsonObject().get("b64_json").getAsString();

@@ -3,10 +3,10 @@ setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
 echo ======================================================
-echo   Album Organizer -- Windows build
+echo   Album Organizer -- Windows Packaging (MSI)
 echo ======================================================
 echo.
-echo Checking build prerequisites...
+echo Checking packaging prerequisites...
 echo.
 
 :: --- Java 21 (Temurin) -------------------------------------------------------
@@ -32,7 +32,7 @@ if errorlevel 1 (
     echo       https://adoptium.net/temurin/releases/?version=21
     exit /b 1
 )
-echo [OK]  Java 21 installed. Re-open this terminal so JAVA_HOME takes effect, then re-run build.bat.
+echo [OK]  Java 21 installed. Re-open this terminal so JAVA_HOME takes effect, then re-run package.bat.
 exit /b 0
 
 :: --- Maven -------------------------------------------------------------------
@@ -57,7 +57,7 @@ call :find_file_recursive "%ProgramFiles(x86)%"                      "mvn.cmd" M
 call :find_file_recursive "%LOCALAPPDATA%\Microsoft\WinGet\Packages" "mvn.cmd" MVN_CMD
 if defined MVN_CMD goto :maven_found
 echo [!!]  Maven installed but mvn.cmd not found in expected locations.
-echo       Re-open this terminal so mvn is on PATH, then re-run build.bat.
+echo       Re-open this terminal so mvn is on PATH, then re-run package.bat.
 exit /b 0
 
 :maven_found
@@ -83,7 +83,7 @@ if defined JP_CMD goto :jpackage_found
 
 echo [XX]  jpackage not found.
 echo       jpackage is bundled with JDK 17+. Make sure JDK 17+ is installed
-echo       and JAVA_HOME\bin is on your PATH, then re-run build.bat.
+echo       and JAVA_HOME\bin is on your PATH, then re-run package.bat.
 exit /b 1
 
 :jpackage_found
@@ -109,15 +109,15 @@ winget install --id WixToolset.WiXToolset --silent --accept-package-agreements -
 if errorlevel 1 (
     echo [!!]  WiX install failed. MSI packaging will likely fail.
     echo       Install manually: https://wixtoolset.org/releases/
-    echo       Then add WiX bin to PATH and re-run build.bat.
-    goto :check_git
+    echo       Then add WiX bin to PATH and re-run package.bat.
+    exit /b 1
 )
 call :find_file_recursive "%ProgramFiles(x86)%"                        "candle.exe" WIX_CMD
 call :find_file_recursive "%ProgramFiles%"                             "candle.exe" WIX_CMD
 call :find_file_recursive "%LOCALAPPDATA%\Microsoft\WinGet\Packages"   "candle.exe" WIX_CMD
 if defined WIX_CMD goto :wix_found
 echo [!!]  WiX installed but candle.exe not found. Re-open terminal after adding WiX bin to PATH.
-goto :check_git
+exit /b 1
 
 :wix_found
 for %%F in ("!WIX_CMD!") do set "WIX_BIN=%%~dpF"
@@ -125,72 +125,24 @@ if "!WIX_BIN:~-1!"=="\" set "WIX_BIN=!WIX_BIN:~0,-1!"
 set "PATH=!WIX_BIN!;!PATH!"
 echo [OK]  WiX Toolset
 
-:: --- Git (optional) -----------------------------------------------------------
-:check_git
-where git >NUL 2>&1
-if not errorlevel 1 goto :git_ok
-echo [..]  Git not found -- installing via winget (needed for local AI servers)...
-winget install --id Git.Git --silent --accept-package-agreements --accept-source-agreements
-if errorlevel 1 (
-    echo [!!]  Git install failed. Install manually: https://git-scm.com/download/win
-) else (
-    echo [OK]  Git installed
-)
-goto :check_python
-:git_ok
-echo [OK]  Git
-
-:: --- Python 3 (optional) ------------------------------------------------------
-:check_python
-where python >NUL 2>&1
-if not errorlevel 1 goto :python_ok
-echo [..]  Python 3 not found -- installing via winget (needed for local AI servers)...
-winget install --id Python.Python.3.11 --silent --accept-package-agreements --accept-source-agreements
-if errorlevel 1 (
-    echo [!!]  Python install failed. Install manually: https://www.python.org/downloads/
-) else (
-    echo [OK]  Python 3 installed
-)
-goto :prereqs_done
-:python_ok
-echo [OK]  Python
-
 :prereqs_done
 echo.
-echo All build prerequisites satisfied.
+echo All packaging prerequisites satisfied.
 echo.
 
-:: --- Optional AI tool guidance -----------------------------------------------
-echo ----------------------------------------------------------------------
-echo   Optional: Local AI servers
-echo   Not required to build or run -- enable in Settings -^> AI Enhancement
-echo ----------------------------------------------------------------------
-echo.
-echo   ComfyUI (image + video, localhost:8188):
-echo     git clone https://github.com/comfyanonymous/ComfyUI
-echo     cd ComfyUI ^&^& python -m venv venv ^&^& venv\Scripts\activate
-echo     pip install -r requirements.txt
-echo     python main.py --listen
-echo     Video: cd custom_nodes ^&^& git clone https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite
-echo.
-echo   Stable Diffusion WebUI (image, localhost:7860):
-echo     git clone https://github.com/AUTOMATIC1111/stable-diffusion-webui
-echo     cd stable-diffusion-webui ^&^& webui-user.bat  (add COMMANDLINE_ARGS=--api)
-echo.
-echo   InvokeAI (image, localhost:9090):
-echo     pip install invokeai ^&^& invokeai-web
-echo.
-echo   Real-ESRGAN model (image upscale, no GPU needed):
-echo     Download RealESRGAN_x4plus.onnx from:
-echo     https://github.com/xinntao/Real-ESRGAN/releases
-echo     Save to: %USERPROFILE%\.config\album-organizer\models\RealESRGAN_x4plus.onnx
-echo ----------------------------------------------------------------------
-echo.
+:: --- Prepare Target Directory (with rename workaround if locked) -------------
+if exist "target" (
+    echo [..] Cleaning target directory...
+    rmdir /s /q "target" >NUL 2>&1
+    if exist "target" (
+        echo [!!] Target directory locked/access denied. Applying rename workaround...
+        rename "target" "target_old_!random!" >NUL 2>&1
+    )
+)
 
 :: --- Build -------------------------------------------------------------------
 echo Building JAR...
-echo [..] Downloading dependencies (first build downloads ~200 MB -- this may take a few minutes)...
-:: Delete any partial downloads left by a previous failed attempt
+echo [..] Downloading dependencies...
 if exist "%USERPROFILE%\.m2\repository\com\microsoft\onnxruntime" (
     del /s /q "%USERPROFILE%\.m2\repository\com\microsoft\onnxruntime\*.part" >NUL 2>&1
     del /s /q "%USERPROFILE%\.m2\repository\com\microsoft\onnxruntime\*.lastUpdated" >NUL 2>&1
@@ -229,14 +181,27 @@ for %%J in (target\lib\javafx-*-win.jar) do (
 
 del /Q target\lib\album-organizer-1.0.0.jar >NUL 2>&1
 
+echo Packaging Windows installer (.msi)...
+"!JP_CMD!" ^
+    --type msi ^
+    --name "AlbumOrganizer" ^
+    --app-version "1.5.0" ^
+    --app-image "target\dist\AlbumOrganizer" ^
+    --icon src\main\resources\app-icon.png ^
+    --dest target\dist ^
+    --win-dir-chooser ^
+    --win-menu ^
+    --win-shortcut
+if errorlevel 1 goto error
+
 echo.
-echo Build complete:
-echo   App:       target\dist\AlbumOrganizer\AlbumOrganizer.exe
+echo Packaging complete:
+echo   Installer: target\dist\AlbumOrganizer-1.5.0.msi
 goto end
 
 :error
 echo.
-echo BUILD FAILED. See errors above.
+echo PACKAGING FAILED. See errors above.
 exit /b 1
 
 :end

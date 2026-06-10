@@ -47,13 +47,16 @@ public class InvokeAIProvider implements EnhancementProvider {
         int height = request.targetSize() != null ? request.targetSize().height : 1024;
 
         // Upload source image
-        String imageId = uploadImage(b64, mimeType, request.inputPath().getFileName().toString());
-        if (imageId == null) {
-            return EnhancementResult.failure("InvokeAI image upload failed");
+        String imageId;
+        try {
+            imageId = uploadImage(b64, mimeType, request.inputPath().getFileName().toString());
+        } catch (ApiException e) {
+            return EnhancementResult.failure(e.getMessage(), e.getTechnicalDetail());
         }
 
         // Queue img2img job via graph API
         JsonObject payload = buildImgToImgGraph(imageId, prompt, width, height);
+        String cleanBody = gson.toJson(payload);
 
         HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
         HttpRequest enqueueReq = HttpRequest.newBuilder()
@@ -66,8 +69,9 @@ public class InvokeAIProvider implements EnhancementProvider {
         try {
             HttpResponse<String> enqueueResp = client.send(enqueueReq, HttpResponse.BodyHandlers.ofString());
             if (enqueueResp.statusCode() != 200 && enqueueResp.statusCode() != 201) {
-                return EnhancementResult.failure("InvokeAI enqueue error HTTP " + enqueueResp.statusCode()
-                    + ": " + enqueueResp.body());
+                String responseBody = enqueueResp.body();
+                String technicalDetail = "Request Sent:\n" + cleanBody + "\n\nResponse Received (HTTP " + enqueueResp.statusCode() + "):\n" + responseBody;
+                return EnhancementResult.failure("InvokeAI enqueue error HTTP " + enqueueResp.statusCode(), technicalDetail);
             }
             JsonObject enqueueJson = gson.fromJson(enqueueResp.body(), JsonObject.class);
             String batchId = enqueueJson.getAsJsonObject("batch").get("batch_id").getAsString();
@@ -121,11 +125,23 @@ public class InvokeAIProvider implements EnhancementProvider {
                 .timeout(Duration.ofSeconds(30))
                 .build();
             HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200 && resp.statusCode() != 201) return null;
+            if (resp.statusCode() != 200 && resp.statusCode() != 201) {
+                String cleanUploadRequest = String.format(
+                    "POST %s/api/v1/images/upload\nContent-Type: multipart/form-data; boundary=%s\n\n" +
+                    "--%s\n" +
+                    "Content-Disposition: form-data; name=\"file\"; filename=\"%s\"\n" +
+                    "Content-Type: %s\n\n" +
+                    "<FILE DATA TRUNCATED>\n" +
+                    "--%s--",
+                    baseUrl, boundary, boundary, filename, mimeType, boundary
+                );
+                String detail = "Request Sent:\n" + cleanUploadRequest + "\n\nResponse Received (HTTP " + resp.statusCode() + "):\n" + resp.body();
+                throw new ApiException("InvokeAI image upload failed", detail);
+            }
             return gson.fromJson(resp.body(), JsonObject.class).get("image_name").getAsString();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return null;
+            throw new IOException("Request interrupted");
         }
     }
 
@@ -196,5 +212,14 @@ public class InvokeAIProvider implements EnhancementProvider {
         String name = path.getFileName().toString();
         int dot = name.lastIndexOf('.');
         return dot >= 0 ? name.substring(dot + 1).toLowerCase() : "jpg";
+    }
+
+    private static class ApiException extends IOException {
+        private final String technicalDetail;
+        public ApiException(String message, String technicalDetail) {
+            super(message);
+            this.technicalDetail = technicalDetail;
+        }
+        public String getTechnicalDetail() { return technicalDetail; }
     }
 }

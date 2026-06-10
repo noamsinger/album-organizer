@@ -93,8 +93,15 @@ public class ThumbnailService {
         BufferedImage image;
         if (type == MediaType.VIDEO) {
             image = extractVideoFrame(file);
-        } else {
+        } else if (needsSpecialHandling(file, type)) {
             image = convertViaSips(file);
+        } else {
+            try {
+                image = ImageIO.read(file.toFile());
+            } catch (IOException e) {
+                logger.debug("Failed to read image directly: {}", file.getFileName(), e);
+                image = null;
+            }
         }
 
         if (image == null) {
@@ -400,6 +407,10 @@ public class ThumbnailService {
             return true;
         }
         String name = file.getFileName().toString().toLowerCase();
-        return name.endsWith(".heic") || name.endsWith(".heif") || name.endsWith(".webp");
+        boolean isMac = System.getProperty("os.name", "").toLowerCase().contains("mac");
+        if (isMac) {
+            return name.endsWith(".heic") || name.endsWith(".heif");
+        }
+        return false;
     }
 }
