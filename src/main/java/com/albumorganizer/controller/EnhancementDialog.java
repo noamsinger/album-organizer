@@ -2,6 +2,7 @@ package com.albumorganizer.controller;
 
 import com.albumorganizer.model.MediaFile;
 import com.albumorganizer.service.enhancement.*;
+import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.concurrent.Task;
@@ -15,13 +16,23 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.awt.Dimension;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
+
+import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 
 public class EnhancementDialog extends Dialog<EnhancementResult> {
 
@@ -50,6 +61,11 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
     private final Consumer<String> onAdditionalPromptChanged;
     private final Path outputDir; // null = next to original; non-null = use this dir
 
+    // record holding checkpoint selection + cached list to persist together
+    public record ComfyUiCheckpointState(String selected, List<String> checkpoints) {}
+
+    public record ProviderParams(double geminiTemperature, String grokModel) {}
+
     public EnhancementDialog(MediaFile mediaFile,
                              List<EnhancementProvider> providers,
                              List<NamedPrompt> savedPrompts,
@@ -57,10 +73,16 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
                              EnhancementProvider initialProvider,
                              List<String> initialCheckedTitles,
                              String initialAdditionalPrompt,
+                             String initialComfyUiCheckpoint,
+                             List<String> initialComfyUiCheckpoints,
+                             String comfyUiBaseUrl,
+                             ProviderParams initialProviderParams,
                              Consumer<List<NamedPrompt>> onPromptsChanged,
                              Consumer<EnhancementProvider> onProviderUsed,
                              Consumer<List<String>> onCheckedTitlesChanged,
                              Consumer<String> onAdditionalPromptChanged,
+                             Consumer<ComfyUiCheckpointState> onComfyUiCheckpointChanged,
+                             Consumer<ProviderParams> onProviderParamsChanged,
                              Path outputDir) {
         this.onPromptsChanged = onPromptsChanged;
         this.onProviderUsed = onProviderUsed;
@@ -106,6 +128,119 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
         }
         providerCombo.setPrefWidth(300);
         grid.add(providerCombo, 1, row); row++;
+
+        // ComfyUI checkpoint row — only visible when ComfyUI provider is selected
+        Label ckptLabel = new Label("Checkpoint:");
+        ComboBox<String> ckptCombo = new ComboBox<>();
+        ckptCombo.setEditable(false);
+        ckptCombo.setPrefWidth(240);
+        ckptCombo.setPromptText("auto-detect");
+        // Populate from cached list
+        List<String> cachedCheckpoints = initialComfyUiCheckpoints != null
+            ? new ArrayList<>(initialComfyUiCheckpoints) : new ArrayList<>();
+        if (!cachedCheckpoints.isEmpty()) {
+            ckptCombo.getItems().setAll(cachedCheckpoints);
+            if (initialComfyUiCheckpoint != null && !initialComfyUiCheckpoint.isBlank()
+                    && cachedCheckpoints.contains(initialComfyUiCheckpoint)) {
+                ckptCombo.setValue(initialComfyUiCheckpoint);
+            } else {
+                ckptCombo.getSelectionModel().selectFirst();
+            }
+        } else if (initialComfyUiCheckpoint != null && !initialComfyUiCheckpoint.isBlank()) {
+            ckptCombo.getItems().add(initialComfyUiCheckpoint);
+            ckptCombo.setValue(initialComfyUiCheckpoint);
+        }
+        Button refreshCkptBtn = new Button("↺");
+        refreshCkptBtn.setTooltip(new Tooltip("Fetch available checkpoints from ComfyUI"));
+        refreshCkptBtn.setOnAction(e -> {
+            refreshCkptBtn.setDisable(true);
+            refreshCkptBtn.setText("…");
+            Thread.ofVirtual().start(() -> {
+                List<String> fetched = fetchCheckpointsFromComfyUI(comfyUiBaseUrl);
+                Platform.runLater(() -> {
+                    refreshCkptBtn.setDisable(false);
+                    refreshCkptBtn.setText("↺");
+                    if (fetched.isEmpty()) {
+                        new Alert(Alert.AlertType.WARNING,
+                            "Could not reach ComfyUI or no checkpoints found.")
+                            .showAndWait();
+                        return;
+                    }
+                    String current = ckptCombo.getValue();
+                    ckptCombo.getItems().setAll(fetched);
+                    if (current != null && fetched.contains(current)) {
+                        ckptCombo.setValue(current);
+                    } else {
+                        ckptCombo.getSelectionModel().selectFirst();
+                    }
+                    if (onComfyUiCheckpointChanged != null) {
+                        onComfyUiCheckpointChanged.accept(
+                            new ComfyUiCheckpointState(ckptCombo.getValue(), new ArrayList<>(fetched)));
+                    }
+                });
+            });
+        });
+        ckptCombo.setOnAction(e -> {
+            if (onComfyUiCheckpointChanged != null && ckptCombo.getValue() != null) {
+                onComfyUiCheckpointChanged.accept(
+                    new ComfyUiCheckpointState(ckptCombo.getValue(),
+                        new ArrayList<>(ckptCombo.getItems())));
+            }
+        });
+        HBox ckptRow = new HBox(6, ckptCombo, refreshCkptBtn);
+        ckptRow.setAlignment(Pos.CENTER_LEFT);
+        grid.add(ckptLabel, 0, row);
+        grid.add(ckptRow, 1, row); row++;
+
+        // Grok model row — declared before Gemini slider so the slider's listener can reference it
+        Label grokModelLabel = new Label("Model:");
+        ComboBox<String> grokModelCombo = new ComboBox<>();
+        grokModelCombo.getItems().addAll(
+            "grok-imagine-image-quality",
+            "grok-imagine-image"
+        );
+        String initGrokModel = (initialProviderParams != null && initialProviderParams.grokModel() != null)
+            ? initialProviderParams.grokModel() : "grok-imagine-image-quality";
+        grokModelCombo.setValue(grokModelCombo.getItems().contains(initGrokModel)
+            ? initGrokModel : "grok-imagine-image-quality");
+        grokModelCombo.setPrefWidth(260);
+        // action handler set below after geminiTempSlider is declared
+
+        // Gemini temperature row
+        Label geminiTempLabel = new Label("Temperature:");
+        Slider geminiTempSlider = new Slider(0.0, 2.0, initialProviderParams != null ? initialProviderParams.geminiTemperature() : 1.0);
+        geminiTempSlider.setMajorTickUnit(0.5);
+        geminiTempSlider.setMinorTickCount(4);
+        geminiTempSlider.setShowTickMarks(true);
+        geminiTempSlider.setShowTickLabels(true);
+        geminiTempSlider.setPrefWidth(220);
+        Label geminiTempValue = new Label(String.format("%.1f", geminiTempSlider.getValue()));
+        geminiTempValue.setPrefWidth(30);
+        geminiTempSlider.valueProperty().addListener((obs, o, n) -> {
+            geminiTempValue.setText(String.format("%.1f", n.doubleValue()));
+            if (onProviderParamsChanged != null) {
+                onProviderParamsChanged.accept(new ProviderParams(
+                    n.doubleValue(), grokModelCombo.getValue()));
+            }
+        });
+        grokModelCombo.setOnAction(e -> {
+            if (onProviderParamsChanged != null) {
+                onProviderParamsChanged.accept(new ProviderParams(
+                    geminiTempSlider.getValue(), grokModelCombo.getValue()));
+            }
+        });
+        HBox geminiTempRow = new HBox(8, geminiTempSlider, geminiTempValue);
+        geminiTempRow.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
+        Tooltip geminiTempTip = new Tooltip(
+            "Controls creativity (0 = precise/literal, 1 = balanced, 2 = highly creative)");
+        geminiTempTip.setWrapText(true);
+        Tooltip.install(geminiTempLabel, geminiTempTip);
+        Tooltip.install(geminiTempSlider, geminiTempTip);
+        grid.add(geminiTempLabel, 0, row);
+        grid.add(geminiTempRow, 1, row); row++;
+
+        grid.add(grokModelLabel, 0, row);
+        grid.add(grokModelCombo, 1, row); row++;
 
         // Resolution
         grid.add(new Label("Resolution:"), 0, row);
@@ -260,7 +395,27 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
             providerWarningLabel.setVisible(noImageInput);
             providerWarningLabel.setManaged(noImageInput);
 
+            boolean isComfyUi = sel instanceof com.albumorganizer.service.enhancement.ComfyUIProvider;
+            ckptLabel.setVisible(isComfyUi);
+            ckptLabel.setManaged(isComfyUi);
+            ckptRow.setVisible(isComfyUi);
+            ckptRow.setManaged(isComfyUi);
+
+            boolean isGemini = sel instanceof com.albumorganizer.service.enhancement.GeminiProvider;
+            geminiTempLabel.setVisible(isGemini);
+            geminiTempLabel.setManaged(isGemini);
+            geminiTempRow.setVisible(isGemini);
+            geminiTempRow.setManaged(isGemini);
+
+            boolean isGrok = sel instanceof com.albumorganizer.service.enhancement.GrokProvider;
+            grokModelLabel.setVisible(isGrok);
+            grokModelLabel.setManaged(isGrok);
+            grokModelCombo.setVisible(isGrok);
+            grokModelCombo.setManaged(isGrok);
+
             refreshProviderInfo(sel);
+
+            if (sel != null && onProviderUsed != null) onProviderUsed.accept(sel);
         });
         providerCombo.fireEvent(new javafx.event.ActionEvent());
 
@@ -288,7 +443,9 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
         enhanceRow.setAlignment(Pos.CENTER_LEFT);
         grid.add(enhanceRow, 1, row);
 
-        enhanceButton.setOnAction(e -> runEnhancement(mediaFile, widthField, heightField, additionalPromptField.getText(), copyToClipboardCheckBox.isSelected()));
+        enhanceButton.setOnAction(e -> runEnhancement(mediaFile, widthField, heightField,
+            additionalPromptField.getText(), copyToClipboardCheckBox.isSelected(),
+            geminiTempSlider, grokModelCombo));
 
         getDialogPane().setContent(grid);
         setResultConverter(btn -> null);
@@ -458,6 +615,30 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
         return dlg.showAndWait();
     }
 
+    private List<String> fetchCheckpointsFromComfyUI(String baseUrl) {
+        if (baseUrl == null || baseUrl.isBlank()) return List.of();
+        try {
+            HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+            HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl.replaceAll("/+$", "") + "/object_info/CheckpointLoaderSimple"))
+                .GET().timeout(Duration.ofSeconds(10)).build();
+            HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) return List.of();
+            JsonObject root = new Gson().fromJson(resp.body(), JsonObject.class);
+            if (root == null || !root.has("CheckpointLoaderSimple")) return List.of();
+            JsonArray names = root.getAsJsonObject("CheckpointLoaderSimple")
+                .getAsJsonObject("input")
+                .getAsJsonObject("required")
+                .getAsJsonArray("ckpt_name")
+                .get(0).getAsJsonArray();
+            List<String> result = new ArrayList<>();
+            for (JsonElement el : names) result.add(el.getAsString());
+            return result;
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
     private void refreshProviderInfo(EnhancementProvider provider) {
         if (provider == null) {
             providerInfoLabel.setText("");
@@ -467,7 +648,9 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
         providerInfoLabel.setText(cost != null ? "Est. cost: " + cost : "Est. cost: Free / Local");
     }
 
-    private void runEnhancement(MediaFile mediaFile, TextField widthField, TextField heightField, String additionalPrompt, boolean copyToClipboard) {
+    private void runEnhancement(MediaFile mediaFile, TextField widthField, TextField heightField,
+                                String additionalPrompt, boolean copyToClipboard,
+                                Slider geminiTempSlider, ComboBox<String> grokModelCombo) {
         EnhancementProvider provider = providerCombo.getValue();
         if (provider == null) return;
 
@@ -490,7 +673,13 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
         }
 
         Dimension targetSize = resolveSize(mediaFile, widthField, heightField);
-        EnhancementRequest request = new EnhancementRequest(mediaFile.getAbsolutePath(), prompt, targetSize, outputDir);
+
+        Map<String, String> params = new java.util.HashMap<>();
+        params.put("temperature", String.format("%.2f", geminiTempSlider.getValue()));
+        params.put("model", grokModelCombo.getValue() != null ? grokModelCombo.getValue() : "grok-imagine-image-quality");
+
+        EnhancementRequest request = new EnhancementRequest(
+            mediaFile.getAbsolutePath(), prompt, targetSize, outputDir, params);
 
         enhanceButton.setDisable(true);
         progressBar.setVisible(true);
@@ -571,15 +760,24 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
             TitledPane techPane = new TitledPane();
             techPane.setText("Technical details");
             techPane.setExpanded(false);
-            
+
             TextArea techArea = new TextArea(technicalDetail);
             techArea.setEditable(false);
             techArea.setWrapText(true);
             techArea.setPrefWidth(520);
             techArea.setPrefHeight(200);
             techArea.setMaxHeight(Double.MAX_VALUE);
-            
-            techPane.setContent(techArea);
+
+            Button copyBtn = new Button("Copy to clipboard");
+            copyBtn.setOnAction(ev -> {
+                javafx.scene.input.ClipboardContent cc = new javafx.scene.input.ClipboardContent();
+                cc.putString((message != null ? message + "\n\n" : "") + technicalDetail);
+                javafx.scene.input.Clipboard.getSystemClipboard().setContent(cc);
+                copyBtn.setText("Copied!");
+            });
+            VBox techBox = new VBox(6, techArea, copyBtn);
+
+            techPane.setContent(techBox);
             techPane.setMaxHeight(Double.MAX_VALUE);
             VBox.setVgrow(techPane, Priority.ALWAYS);
             content.getChildren().add(techPane);

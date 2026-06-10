@@ -1116,16 +1116,20 @@ public class MainController {
             lastUsedProvider,
             lastCheckedPromptTitles,
             lastAdditionalPrompt,
+            enhancementConfig.comfyUiCheckpoint(),
+            enhancementConfig.comfyUiCheckpoints(),
+            enhancementConfig.comfyUiUrl(),
+            new EnhancementDialog.ProviderParams(enhancementConfig.geminiTemperature(), enhancementConfig.grokModel()),
             updatedPrompts -> {
                 EnhancementConfig current = configRepository.getEnhancementConfig();
                 EnhancementConfig updated = new EnhancementConfig(
                     current.stabilityAiEnabled(), current.stabilityAiKey(),
                     current.openAiEnabled(), current.openAiKey(),
-                    current.geminiEnabled(), current.geminiKey(),
-                    current.grokEnabled(), current.grokKey(),
+                    current.geminiEnabled(), current.geminiKey(), current.geminiTemperature(),
+                    current.grokEnabled(), current.grokKey(), current.grokModel(),
                     current.sdLocalEnabled(), current.sdLocalUrl(),
                     current.realEsrganEnabled(), current.realEsrganModelPath(),
-                    current.comfyUiEnabled(), current.comfyUiUrl(), current.comfyUiCheckpoint(),
+                    current.comfyUiEnabled(), current.comfyUiUrl(), current.comfyUiCheckpoint(), current.comfyUiCheckpoints(),
                     current.invokeAiEnabled(), current.invokeAiUrl(),
                     new ArrayList<>(updatedPrompts),
                     lastCheckedPromptTitles
@@ -1139,11 +1143,11 @@ public class MainController {
                 EnhancementConfig updated = new EnhancementConfig(
                     current.stabilityAiEnabled(), current.stabilityAiKey(),
                     current.openAiEnabled(), current.openAiKey(),
-                    current.geminiEnabled(), current.geminiKey(),
-                    current.grokEnabled(), current.grokKey(),
+                    current.geminiEnabled(), current.geminiKey(), current.geminiTemperature(),
+                    current.grokEnabled(), current.grokKey(), current.grokModel(),
                     current.sdLocalEnabled(), current.sdLocalUrl(),
                     current.realEsrganEnabled(), current.realEsrganModelPath(),
-                    current.comfyUiEnabled(), current.comfyUiUrl(), current.comfyUiCheckpoint(),
+                    current.comfyUiEnabled(), current.comfyUiUrl(), current.comfyUiCheckpoint(), current.comfyUiCheckpoints(),
                     current.invokeAiEnabled(), current.invokeAiUrl(),
                     current.savedPrompts(),
                     lastCheckedPromptTitles
@@ -1151,6 +1155,35 @@ public class MainController {
                 configRepository.setEnhancementConfig(updated);
             },
             additionalPrompt -> lastAdditionalPrompt = additionalPrompt,
+            state -> {
+                EnhancementConfig current = configRepository.getEnhancementConfig();
+                configRepository.setEnhancementConfig(new EnhancementConfig(
+                    current.stabilityAiEnabled(), current.stabilityAiKey(),
+                    current.openAiEnabled(), current.openAiKey(),
+                    current.geminiEnabled(), current.geminiKey(), current.geminiTemperature(),
+                    current.grokEnabled(), current.grokKey(), current.grokModel(),
+                    current.sdLocalEnabled(), current.sdLocalUrl(),
+                    current.realEsrganEnabled(), current.realEsrganModelPath(),
+                    current.comfyUiEnabled(), current.comfyUiUrl(), state.selected(), state.checkpoints(),
+                    current.invokeAiEnabled(), current.invokeAiUrl(),
+                    current.savedPrompts(), current.checkedPromptTitles()
+                ));
+                imageEnhancementService.reloadProviders();
+            },
+            pp -> {
+                EnhancementConfig current = configRepository.getEnhancementConfig();
+                configRepository.setEnhancementConfig(new EnhancementConfig(
+                    current.stabilityAiEnabled(), current.stabilityAiKey(),
+                    current.openAiEnabled(), current.openAiKey(),
+                    current.geminiEnabled(), current.geminiKey(), pp.geminiTemperature(),
+                    current.grokEnabled(), current.grokKey(), pp.grokModel(),
+                    current.sdLocalEnabled(), current.sdLocalUrl(),
+                    current.realEsrganEnabled(), current.realEsrganModelPath(),
+                    current.comfyUiEnabled(), current.comfyUiUrl(), current.comfyUiCheckpoint(), current.comfyUiCheckpoints(),
+                    current.invokeAiEnabled(), current.invokeAiUrl(),
+                    current.savedPrompts(), current.checkedPromptTitles()
+                ));
+            },
             outputDir);
         dialog.initOwner(rootPane.getScene().getWindow());
         dialog.showAndWait().ifPresent(result -> {
@@ -1258,16 +1291,20 @@ public class MainController {
             lastUsedProvider,
             lastCheckedPromptTitles,
             lastAdditionalPrompt,
+            enhancementConfig.comfyUiCheckpoint(),
+            enhancementConfig.comfyUiCheckpoints(),
+            enhancementConfig.comfyUiUrl(),
+            new EnhancementDialog.ProviderParams(enhancementConfig.geminiTemperature(), enhancementConfig.grokModel()),
             updatedPrompts -> {
                 EnhancementConfig current = configRepository.getEnhancementConfig();
                 configRepository.setEnhancementConfig(new EnhancementConfig(
                     current.stabilityAiEnabled(), current.stabilityAiKey(),
                     current.openAiEnabled(), current.openAiKey(),
-                    current.geminiEnabled(), current.geminiKey(),
-                    current.grokEnabled(), current.grokKey(),
+                    current.geminiEnabled(), current.geminiKey(), current.geminiTemperature(),
+                    current.grokEnabled(), current.grokKey(), current.grokModel(),
                     current.sdLocalEnabled(), current.sdLocalUrl(),
                     current.realEsrganEnabled(), current.realEsrganModelPath(),
-                    current.comfyUiEnabled(), current.comfyUiUrl(), current.comfyUiCheckpoint(),
+                    current.comfyUiEnabled(), current.comfyUiUrl(), current.comfyUiCheckpoint(), current.comfyUiCheckpoints(),
                     current.invokeAiEnabled(), current.invokeAiUrl(),
                     new ArrayList<>(updatedPrompts), lastCheckedPromptTitles));
             },
@@ -1278,15 +1315,44 @@ public class MainController {
                 configRepository.setEnhancementConfig(new EnhancementConfig(
                     current.stabilityAiEnabled(), current.stabilityAiKey(),
                     current.openAiEnabled(), current.openAiKey(),
-                    current.geminiEnabled(), current.geminiKey(),
-                    current.grokEnabled(), current.grokKey(),
+                    current.geminiEnabled(), current.geminiKey(), current.geminiTemperature(),
+                    current.grokEnabled(), current.grokKey(), current.grokModel(),
                     current.sdLocalEnabled(), current.sdLocalUrl(),
                     current.realEsrganEnabled(), current.realEsrganModelPath(),
-                    current.comfyUiEnabled(), current.comfyUiUrl(), current.comfyUiCheckpoint(),
+                    current.comfyUiEnabled(), current.comfyUiUrl(), current.comfyUiCheckpoint(), current.comfyUiCheckpoints(),
                     current.invokeAiEnabled(), current.invokeAiUrl(),
                     current.savedPrompts(), lastCheckedPromptTitles));
             },
             additionalPrompt -> lastAdditionalPrompt = additionalPrompt,
+            state -> {
+                EnhancementConfig current = configRepository.getEnhancementConfig();
+                configRepository.setEnhancementConfig(new EnhancementConfig(
+                    current.stabilityAiEnabled(), current.stabilityAiKey(),
+                    current.openAiEnabled(), current.openAiKey(),
+                    current.geminiEnabled(), current.geminiKey(), current.geminiTemperature(),
+                    current.grokEnabled(), current.grokKey(), current.grokModel(),
+                    current.sdLocalEnabled(), current.sdLocalUrl(),
+                    current.realEsrganEnabled(), current.realEsrganModelPath(),
+                    current.comfyUiEnabled(), current.comfyUiUrl(), state.selected(), state.checkpoints(),
+                    current.invokeAiEnabled(), current.invokeAiUrl(),
+                    current.savedPrompts(), current.checkedPromptTitles()
+                ));
+                imageEnhancementService.reloadProviders();
+            },
+            pp -> {
+                EnhancementConfig current = configRepository.getEnhancementConfig();
+                configRepository.setEnhancementConfig(new EnhancementConfig(
+                    current.stabilityAiEnabled(), current.stabilityAiKey(),
+                    current.openAiEnabled(), current.openAiKey(),
+                    current.geminiEnabled(), current.geminiKey(), pp.geminiTemperature(),
+                    current.grokEnabled(), current.grokKey(), pp.grokModel(),
+                    current.sdLocalEnabled(), current.sdLocalUrl(),
+                    current.realEsrganEnabled(), current.realEsrganModelPath(),
+                    current.comfyUiEnabled(), current.comfyUiUrl(), current.comfyUiCheckpoint(), current.comfyUiCheckpoints(),
+                    current.invokeAiEnabled(), current.invokeAiUrl(),
+                    current.savedPrompts(), current.checkedPromptTitles()
+                ));
+            },
             aiDir);
         dialog.initOwner(rootPane.getScene().getWindow());
         dialog.showAndWait().ifPresent(result -> {

@@ -489,8 +489,10 @@ public class ConfigRepository {
             s.getOrDefault("openAiKey", ""),
             Boolean.parseBoolean(s.getOrDefault("geminiEnabled", "false")),
             s.getOrDefault("geminiKey", ""),
+            Double.parseDouble(s.getOrDefault("geminiTemperature", "1.0")),
             Boolean.parseBoolean(s.getOrDefault("grokEnabled", "false")),
             s.getOrDefault("grokKey", ""),
+            s.getOrDefault("grokModel", "grok-imagine-image-quality"),
             Boolean.parseBoolean(s.getOrDefault("sdLocalEnabled", "false")),
             s.getOrDefault("sdLocalUrl", "http://localhost:7860"),
             Boolean.parseBoolean(s.getOrDefault("realEsrganEnabled", "false")),
@@ -498,6 +500,7 @@ public class ConfigRepository {
             Boolean.parseBoolean(s.getOrDefault("comfyUiEnabled", "false")),
             s.getOrDefault("comfyUiUrl", "http://localhost:8188"),
             s.getOrDefault("comfyUiCheckpoint", ""),
+            parseCheckedTitles(s.getOrDefault("comfyUiCheckpoints", "")),
             Boolean.parseBoolean(s.getOrDefault("invokeAiEnabled", "false")),
             s.getOrDefault("invokeAiUrl", "http://localhost:9090"),
             savedPrompts,
@@ -514,8 +517,10 @@ public class ConfigRepository {
         s.put("openAiKey", cfg.openAiKey());
         s.put("geminiEnabled", String.valueOf(cfg.geminiEnabled()));
         s.put("geminiKey", cfg.geminiKey());
+        s.put("geminiTemperature", String.valueOf(cfg.geminiTemperature()));
         s.put("grokEnabled", String.valueOf(cfg.grokEnabled()));
         s.put("grokKey", cfg.grokKey());
+        s.put("grokModel", cfg.grokModel() != null ? cfg.grokModel() : "grok-imagine-image-quality");
         s.put("sdLocalEnabled", String.valueOf(cfg.sdLocalEnabled()));
         s.put("sdLocalUrl", cfg.sdLocalUrl());
         s.put("realEsrganEnabled", String.valueOf(cfg.realEsrganEnabled()));
@@ -523,6 +528,13 @@ public class ConfigRepository {
         s.put("comfyUiEnabled", String.valueOf(cfg.comfyUiEnabled()));
         s.put("comfyUiUrl", cfg.comfyUiUrl());
         s.put("comfyUiCheckpoint", cfg.comfyUiCheckpoint() != null ? cfg.comfyUiCheckpoint() : "");
+        if (cfg.comfyUiCheckpoints() != null && !cfg.comfyUiCheckpoints().isEmpty()) {
+            s.put("comfyUiCheckpoints", cfg.comfyUiCheckpoints().stream()
+                .map(t -> t.replace("||", "__PIPE__"))
+                .collect(java.util.stream.Collectors.joining("||")));
+        } else {
+            s.remove("comfyUiCheckpoints");
+        }
         s.put("invokeAiEnabled", String.valueOf(cfg.invokeAiEnabled()));
         s.put("invokeAiUrl", cfg.invokeAiUrl());
         if (cfg.savedPrompts() != null && !cfg.savedPrompts().isEmpty()) {

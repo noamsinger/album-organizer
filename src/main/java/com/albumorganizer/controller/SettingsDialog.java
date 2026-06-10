@@ -2,7 +2,6 @@ package com.albumorganizer.controller;
 
 import com.albumorganizer.model.AlbumOrganizerSettings;
 import com.albumorganizer.service.enhancement.EnhancementConfig;
-import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
@@ -13,17 +12,7 @@ import javafx.scene.layout.VBox;
 import java.awt.Desktop;
 import java.net.URI;
 import java.net.URLEncoder;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
-import java.util.List;
-
-import com.google.gson.Gson;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
 
 public class SettingsDialog extends Dialog<SettingsDialog.Result> {
 
@@ -57,7 +46,6 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
     private final TextField realEsrganPathField;
     private final CheckBox comfyUiEnabledCheck;
     private final TextField comfyUiUrlField;
-    private final ComboBox<String> comfyUiCheckpointCombo;
 
     public SettingsDialog(AlbumOrganizerSettings currentSettings, EnhancementConfig currentEnhancement, double fontScale) {
         setTitle("Settings");
@@ -301,28 +289,8 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
         comfyUiUrlField = new TextField(currentEnhancement.comfyUiUrl());
         comfyUiUrlField.setPrefWidth(300);
         comfyUiUrlField.setPromptText("http://localhost:8188");
-        aiGrid.add(comfyUiUrlField, 1, ai); ai++;
+        aiGrid.add(comfyUiUrlField, 1, ai);
         bindToCheck(comfyUiEnabledCheck, comfyUiUrlField);
-
-        aiGrid.add(new Label("Checkpoint:"), 0, ai);
-        comfyUiCheckpointCombo = new ComboBox<>();
-        comfyUiCheckpointCombo.setEditable(true);
-        comfyUiCheckpointCombo.setPrefWidth(260);
-        comfyUiCheckpointCombo.setPromptText("auto-detect");
-        String savedCkpt = currentEnhancement.comfyUiCheckpoint();
-        if (savedCkpt != null && !savedCkpt.isBlank()) {
-            comfyUiCheckpointCombo.getItems().add(savedCkpt);
-            comfyUiCheckpointCombo.setValue(savedCkpt);
-        }
-        Button refreshCkptBtn = new Button("↺");
-        refreshCkptBtn.setTooltip(new Tooltip("Fetch available checkpoints from ComfyUI"));
-        refreshCkptBtn.setOnAction(e -> fetchAndPopulateCheckpoints(
-            comfyUiUrlField.getText().trim(), comfyUiCheckpointCombo, refreshCkptBtn));
-        HBox ckptRow = new HBox(6, comfyUiCheckpointCombo, refreshCkptBtn);
-        ckptRow.setAlignment(Pos.CENTER_LEFT);
-        aiGrid.add(ckptRow, 1, ai);
-        bindToCheck(comfyUiEnabledCheck, comfyUiCheckpointCombo);
-        bindToCheck(comfyUiEnabledCheck, refreshCkptBtn);
 
         // ── Top-level tabs ────────────────────────────────────────────────────
         ScrollPane aiScroll = new ScrollPane(aiGrid);
@@ -406,55 +374,6 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
         check.selectedProperty().addListener((obs, o, n) -> field.setDisable(!n));
     }
 
-    private void fetchAndPopulateCheckpoints(String baseUrl, ComboBox<String> combo, Button btn) {
-        if (baseUrl.isBlank()) return;
-        btn.setDisable(true);
-        btn.setText("…");
-        Thread.ofVirtual().start(() -> {
-            List<String> checkpoints = fetchCheckpointsFromComfyUI(baseUrl);
-            Platform.runLater(() -> {
-                btn.setDisable(false);
-                btn.setText("↺");
-                if (checkpoints.isEmpty()) {
-                    new Alert(Alert.AlertType.WARNING,
-                        "Could not reach ComfyUI at " + baseUrl + " or no checkpoints found.")
-                        .showAndWait();
-                    return;
-                }
-                String current = combo.getValue();
-                combo.getItems().setAll(checkpoints);
-                if (current != null && checkpoints.contains(current)) {
-                    combo.setValue(current);
-                } else {
-                    combo.setValue(checkpoints.get(0));
-                }
-            });
-        });
-    }
-
-    private List<String> fetchCheckpointsFromComfyUI(String baseUrl) {
-        try {
-            HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
-            HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + "/object_info/CheckpointLoaderSimple"))
-                .GET().timeout(Duration.ofSeconds(10)).build();
-            HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) return List.of();
-            JsonObject root = new Gson().fromJson(resp.body(), JsonObject.class);
-            if (root == null || !root.has("CheckpointLoaderSimple")) return List.of();
-            JsonArray names = root.getAsJsonObject("CheckpointLoaderSimple")
-                .getAsJsonObject("input")
-                .getAsJsonObject("required")
-                .getAsJsonArray("ckpt_name")
-                .get(0).getAsJsonArray();
-            java.util.List<String> result = new java.util.ArrayList<>();
-            for (JsonElement el : names) result.add(el.getAsString());
-            return result;
-        } catch (Exception e) {
-            return List.of();
-        }
-    }
-
     private void openSearch(String query) {
         try {
             String encoded = URLEncoder.encode(query, StandardCharsets.UTF_8);
@@ -501,12 +420,12 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
         return new EnhancementConfig(
             stabilityEnabledCheck.isSelected(), stabilityKeyField.getText().trim(),
             openAiEnabledCheck.isSelected(), openAiKeyField.getText().trim(),
-            geminiEnabledCheck.isSelected(), geminiKeyField.getText().trim(),
-            grokEnabledCheck.isSelected(), grokKeyField.getText().trim(),
+            geminiEnabledCheck.isSelected(), geminiKeyField.getText().trim(), current.geminiTemperature(),
+            grokEnabledCheck.isSelected(), grokKeyField.getText().trim(), current.grokModel(),
             sdLocalEnabledCheck.isSelected(), sdLocalUrlField.getText().trim(),
             realEsrganEnabledCheck.isSelected(), realEsrganPathField.getText().trim(),
             comfyUiEnabledCheck.isSelected(), comfyUiUrlField.getText().trim(),
-            comfyUiCheckpointCombo.getValue() != null ? comfyUiCheckpointCombo.getValue().trim() : "",
+            current.comfyUiCheckpoint(), current.comfyUiCheckpoints(),
             invokeAiEnabledCheck.isSelected(), invokeAiUrlField.getText().trim(),
             current.savedPrompts(),
             current.checkedPromptTitles()

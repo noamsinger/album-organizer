@@ -51,9 +51,10 @@ public class GeminiProvider implements EnhancementProvider {
                   ]
                 }
               ],
-              "generationConfig": { "responseModalities": ["IMAGE", "TEXT"] }
+              "generationConfig": { "responseModalities": ["IMAGE", "TEXT"], "temperature": %s }
             }
-            """.formatted(escapeJson(prompt), mimeType, b64Image);
+            """.formatted(escapeJson(prompt), mimeType, b64Image,
+                request.param("temperature", "1.0"));
 
         String cleanBody = """
             {
@@ -65,9 +66,10 @@ public class GeminiProvider implements EnhancementProvider {
                   ]
                 }
               ],
-              "generationConfig": { "responseModalities": ["IMAGE", "TEXT"] }
+              "generationConfig": { "responseModalities": ["IMAGE", "TEXT"], "temperature": %s }
             }
-            """.formatted(escapeJson(prompt), mimeType);
+            """.formatted(escapeJson(prompt), mimeType,
+                request.param("temperature", "1.0"));
 
         HttpRequest req = HttpRequest.newBuilder()
             .uri(URI.create(API_URL + "?key=" + apiKey))

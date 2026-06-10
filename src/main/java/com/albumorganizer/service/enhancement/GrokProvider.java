@@ -21,7 +21,7 @@ public class GrokProvider implements EnhancementProvider {
     private static final Logger logger = LoggerFactory.getLogger(GrokProvider.class);
     private static final String EDITS_ENDPOINT = "https://api.x.ai/v1/images/edits";
     private static final String BALANCE_ENDPOINT = "https://api.x.ai/v1/api-key";
-    private static final String MODEL = "grok-imagine-image-quality";
+    private static final String DEFAULT_MODEL = "grok-imagine-image-quality";
 
     private final String apiKey;
     private final HttpClient http = HttpClient.newBuilder()
@@ -37,7 +37,7 @@ public class GrokProvider implements EnhancementProvider {
     @Override public String getShortId()      { return "grok"; }
     @Override public boolean isConfigured()   { return apiKey != null && !apiKey.isBlank(); }
     @Override public boolean supportsPrompt() { return true; }
-    @Override public String estimatedCostPerImage() { return "~$0.05 / image (grok-imagine-image-quality)"; }
+    @Override public String estimatedCostPerImage() { return "~$0.05 / image (quality) · ~$0.02 (standard)"; }
 
     @Override
     public EnhancementResult enhance(EnhancementRequest request) throws IOException {
@@ -48,12 +48,14 @@ public class GrokProvider implements EnhancementProvider {
             ? request.prompt()
             : "Enhance this image: improve sharpness, color, and overall quality.";
 
+        String model = request.param("model", DEFAULT_MODEL);
+
         JsonObject imageObj = new JsonObject();
         imageObj.addProperty("url", dataUrl);
         imageObj.addProperty("type", "image_url");
 
         JsonObject payload = new JsonObject();
-        payload.addProperty("model", MODEL);
+        payload.addProperty("model", model);
         payload.addProperty("prompt", prompt);
         payload.add("image", imageObj);
         payload.addProperty("num_images", 1);
@@ -64,7 +66,7 @@ public class GrokProvider implements EnhancementProvider {
         cleanImageObj.addProperty("type", "image_url");
 
         JsonObject cleanPayload = new JsonObject();
-        cleanPayload.addProperty("model", MODEL);
+        cleanPayload.addProperty("model", model);
         cleanPayload.addProperty("prompt", prompt);
         cleanPayload.add("image", cleanImageObj);
         cleanPayload.addProperty("num_images", 1);
@@ -72,7 +74,7 @@ public class GrokProvider implements EnhancementProvider {
 
         String cleanBody = gson.toJson(cleanPayload);
 
-        logger.info("Calling Grok edits endpoint with model {}", MODEL);
+        logger.info("Calling Grok edits endpoint with model {}", model);
 
         HttpRequest req = HttpRequest.newBuilder()
             .uri(URI.create(EDITS_ENDPOINT))
