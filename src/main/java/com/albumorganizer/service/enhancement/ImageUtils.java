@@ -124,6 +124,9 @@ class ImageUtils {
     }
 
     private static BufferedImage readHeic(Path path) throws IOException {
+        if (!System.getProperty("os.name", "").toLowerCase().contains("mac")) {
+            return null;
+        }
         java.nio.file.Path tmp = java.nio.file.Files.createTempFile("heic_enhance_", ".jpg");
         try {
             ProcessBuilder pb = new ProcessBuilder(

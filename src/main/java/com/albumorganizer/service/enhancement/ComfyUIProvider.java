@@ -36,10 +36,12 @@ public class ComfyUIProvider implements EnhancementProvider {
     private static final long POLL_INTERVAL_MS = 2_000L;
 
     private final String baseUrl;
+    private final String configuredCheckpoint;
     private final Gson gson = new Gson();
 
-    public ComfyUIProvider(String baseUrl) {
+    public ComfyUIProvider(String baseUrl, String configuredCheckpoint) {
         this.baseUrl = baseUrl != null ? baseUrl.replaceAll("/+$", "") : "http://localhost:8188";
+        this.configuredCheckpoint = configuredCheckpoint != null ? configuredCheckpoint.trim() : "";
     }
 
     @Override public String getName()       { return "ComfyUI (Local)"; }
@@ -86,8 +88,7 @@ public class ComfyUIProvider implements EnhancementProvider {
         int height = request.targetSize() != null ? request.targetSize().height : 1024;
 
         HttpClient client = newClient();
-        List<String> checkpoints = fetchCheckpoints(client);
-        String ckptName = selectCheckpoint(checkpoints);
+        String ckptName = resolveCheckpoint(client);
         logger.info("Using ComfyUI checkpoint: {}", ckptName);
 
         JsonObject workflow = buildImageWorkflow(uploadedName, prompt, width, height, ckptName);
@@ -147,8 +148,7 @@ public class ComfyUIProvider implements EnhancementProvider {
 
         String prompt = coalesce(request.prompt(), "enhance, high quality, detailed");
         HttpClient client = newClient();
-        List<String> checkpoints = fetchCheckpoints(client);
-        String ckptName = selectCheckpoint(checkpoints);
+        String ckptName = resolveCheckpoint(client);
         logger.info("Using ComfyUI checkpoint for video: {}", ckptName);
 
         JsonObject workflow = buildVideoWorkflow(uploadedName, prompt, ckptName);
@@ -513,6 +513,13 @@ public class ComfyUIProvider implements EnhancementProvider {
 
     private String coalesce(String value, String fallback) {
         return (value != null && !value.isBlank()) ? value : fallback;
+    }
+
+    private String resolveCheckpoint(HttpClient client) {
+        if (!configuredCheckpoint.isBlank()) {
+            return configuredCheckpoint;
+        }
+        return selectCheckpoint(fetchCheckpoints(client));
     }
 
     private List<String> fetchCheckpoints(HttpClient client) {

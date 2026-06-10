@@ -497,6 +497,7 @@ public class ConfigRepository {
             s.getOrDefault("realEsrganModelPath", ""),
             Boolean.parseBoolean(s.getOrDefault("comfyUiEnabled", "false")),
             s.getOrDefault("comfyUiUrl", "http://localhost:8188"),
+            s.getOrDefault("comfyUiCheckpoint", ""),
             Boolean.parseBoolean(s.getOrDefault("invokeAiEnabled", "false")),
             s.getOrDefault("invokeAiUrl", "http://localhost:9090"),
             savedPrompts,
@@ -521,6 +522,7 @@ public class ConfigRepository {
         s.put("realEsrganModelPath", cfg.realEsrganModelPath());
         s.put("comfyUiEnabled", String.valueOf(cfg.comfyUiEnabled()));
         s.put("comfyUiUrl", cfg.comfyUiUrl());
+        s.put("comfyUiCheckpoint", cfg.comfyUiCheckpoint() != null ? cfg.comfyUiCheckpoint() : "");
         s.put("invokeAiEnabled", String.valueOf(cfg.invokeAiEnabled()));
         s.put("invokeAiUrl", cfg.invokeAiUrl());
         if (cfg.savedPrompts() != null && !cfg.savedPrompts().isEmpty()) {

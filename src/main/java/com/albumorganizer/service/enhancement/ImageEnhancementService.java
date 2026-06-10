@@ -69,7 +69,7 @@ public class ImageEnhancementService {
             providers.add(new StableDiffusionLocalProvider(cfg.sdLocalUrl()));
         }
         if (cfg.comfyUiEnabled()) {
-            providers.add(new ComfyUIProvider(cfg.comfyUiUrl()));
+            providers.add(new ComfyUIProvider(cfg.comfyUiUrl(), cfg.comfyUiCheckpoint()));
         }
         if (cfg.invokeAiEnabled()) {
             providers.add(new InvokeAIProvider(cfg.invokeAiUrl()));

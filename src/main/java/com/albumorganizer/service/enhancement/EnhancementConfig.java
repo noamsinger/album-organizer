@@ -17,6 +17,7 @@ public record EnhancementConfig(
     String realEsrganModelPath,
     boolean comfyUiEnabled,
     String comfyUiUrl,
+    String comfyUiCheckpoint,
     boolean invokeAiEnabled,
     String invokeAiUrl,
     List<NamedPrompt> savedPrompts,
@@ -31,7 +32,7 @@ public record EnhancementConfig(
             false, "",
             false, "http://localhost:7860",
             false, "",
-            false, "http://localhost:8188",
+            false, "http://localhost:8188", "",
             false, "http://localhost:9090",
             List.of(),
             List.of()

@@ -916,13 +916,7 @@ public class MainController {
     }
 
     private void openWithPreviewIfImage(File file, MediaType type) throws IOException {
-        // On macOS, always open images with Preview for a consistent experience
-        if (type == MediaType.IMAGE && System.getProperty("os.name", "").toLowerCase().contains("mac")) {
-            new ProcessBuilder("open", "-a", "Preview", file.getAbsolutePath())
-                .start();
-        } else {
-            Desktop.getDesktop().open(file);
-        }
+        Desktop.getDesktop().open(file);
     }
 
     private void showInFolder(MediaFile mediaFile) {
@@ -1131,7 +1125,7 @@ public class MainController {
                     current.grokEnabled(), current.grokKey(),
                     current.sdLocalEnabled(), current.sdLocalUrl(),
                     current.realEsrganEnabled(), current.realEsrganModelPath(),
-                    current.comfyUiEnabled(), current.comfyUiUrl(),
+                    current.comfyUiEnabled(), current.comfyUiUrl(), current.comfyUiCheckpoint(),
                     current.invokeAiEnabled(), current.invokeAiUrl(),
                     new ArrayList<>(updatedPrompts),
                     lastCheckedPromptTitles
@@ -1149,7 +1143,7 @@ public class MainController {
                     current.grokEnabled(), current.grokKey(),
                     current.sdLocalEnabled(), current.sdLocalUrl(),
                     current.realEsrganEnabled(), current.realEsrganModelPath(),
-                    current.comfyUiEnabled(), current.comfyUiUrl(),
+                    current.comfyUiEnabled(), current.comfyUiUrl(), current.comfyUiCheckpoint(),
                     current.invokeAiEnabled(), current.invokeAiUrl(),
                     current.savedPrompts(),
                     lastCheckedPromptTitles
@@ -1273,7 +1267,7 @@ public class MainController {
                     current.grokEnabled(), current.grokKey(),
                     current.sdLocalEnabled(), current.sdLocalUrl(),
                     current.realEsrganEnabled(), current.realEsrganModelPath(),
-                    current.comfyUiEnabled(), current.comfyUiUrl(),
+                    current.comfyUiEnabled(), current.comfyUiUrl(), current.comfyUiCheckpoint(),
                     current.invokeAiEnabled(), current.invokeAiUrl(),
                     new ArrayList<>(updatedPrompts), lastCheckedPromptTitles));
             },
@@ -1288,7 +1282,7 @@ public class MainController {
                     current.grokEnabled(), current.grokKey(),
                     current.sdLocalEnabled(), current.sdLocalUrl(),
                     current.realEsrganEnabled(), current.realEsrganModelPath(),
-                    current.comfyUiEnabled(), current.comfyUiUrl(),
+                    current.comfyUiEnabled(), current.comfyUiUrl(), current.comfyUiCheckpoint(),
                     current.invokeAiEnabled(), current.invokeAiUrl(),
                     current.savedPrompts(), lastCheckedPromptTitles));
             },
