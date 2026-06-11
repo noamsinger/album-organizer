@@ -32,6 +32,8 @@
                 </RadioMenuItem>
                 <RadioMenuItem text="Thumbnail View" fx:id="thumbnailViewMenuItem" onAction="#onThumbnailView" toggleGroup="$viewToggleGroup"/>
                 <SeparatorMenuItem/>
+                <MenuItem text="Toggle Full Screen" fx:id="toggleFullScreenMenuItem" onAction="#onToggleFullScreen"/>
+                <SeparatorMenuItem/>
                 <CheckMenuItem text="Show Archives in Tree" fx:id="showArchivesMenuItem" onAction="#onToggleShowArchives" selected="true"/>
                 <SeparatorMenuItem/>
                 <Menu text="Sort By">
@@ -45,6 +47,13 @@
                     <RadioMenuItem text="Type" fx:id="sortByTypeMenuItem" onAction="#onSortByType" toggleGroup="$sortToggleGroup"/>
                     <RadioMenuItem text="Duration" fx:id="sortByDurationMenuItem" onAction="#onSortByDuration" toggleGroup="$sortToggleGroup"/>
                     <RadioMenuItem text="Resolution" fx:id="sortByResolutionMenuItem" onAction="#onSortByResolution" toggleGroup="$sortToggleGroup"/>
+                    <SeparatorMenuItem/>
+                    <RadioMenuItem text="Ascending" fx:id="sortAscendingMenuItem" onAction="#onSortAscending" selected="true">
+                        <toggleGroup>
+                            <ToggleGroup fx:id="sortDirectionToggleGroup"/>
+                        </toggleGroup>
+                    </RadioMenuItem>
+                    <RadioMenuItem text="Descending" fx:id="sortDescendingMenuItem" onAction="#onSortDescending" toggleGroup="$sortDirectionToggleGroup"/>
                 </Menu>
                 <SeparatorMenuItem/>
                 <CheckMenuItem text="Show Progress Panel" fx:id="showProgressPanelMenuItem" onAction="#onToggleProgressPanel"/>

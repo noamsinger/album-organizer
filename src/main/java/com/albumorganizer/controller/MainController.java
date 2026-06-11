@@ -116,6 +116,9 @@ public class MainController {
     @FXML private RadioMenuItem sortByTypeMenuItem;
     @FXML private RadioMenuItem sortByDurationMenuItem;
     @FXML private RadioMenuItem sortByResolutionMenuItem;
+    @FXML private RadioMenuItem sortAscendingMenuItem;
+    @FXML private RadioMenuItem sortDescendingMenuItem;
+    @FXML private MenuItem toggleFullScreenMenuItem;
     @FXML private Button viewReportButton;
     @FXML private Button stopProgressButton;
     @FXML private Button hideProgressButton;
@@ -2694,38 +2697,63 @@ public class MainController {
     }
 
     @FXML
+    private void onToggleFullScreen() {
+        Stage stage = (Stage) rootPane.getScene().getWindow();
+        stage.setFullScreen(!stage.isFullScreen());
+    }
+
+    @FXML
     private void onSortByName() {
-        applySortOrder(filenameColumn, TableColumn.SortType.ASCENDING);
+        applySortOrder(filenameColumn);
     }
 
     @FXML
     private void onSortByDateTaken() {
-        applySortOrder(dateTakenColumn, TableColumn.SortType.ASCENDING);
+        applySortOrder(dateTakenColumn);
     }
 
     @FXML
     private void onSortByDate() {
-        applySortOrder(dateColumn, TableColumn.SortType.ASCENDING);
+        applySortOrder(dateColumn);
     }
 
     @FXML
     private void onSortByType() {
-        applySortOrder(typeColumn, TableColumn.SortType.ASCENDING);
+        applySortOrder(typeColumn);
     }
 
     @FXML
     private void onSortByDuration() {
-        applySortOrder(durationColumn, TableColumn.SortType.ASCENDING);
+        applySortOrder(durationColumn);
     }
 
     @FXML
     private void onSortByResolution() {
-        applySortOrder(resolutionColumn, TableColumn.SortType.DESCENDING);
+        applySortOrder(resolutionColumn);
     }
 
-    private void applySortOrder(TableColumn<MediaFile, ?> column, TableColumn.SortType sortType) {
+    @FXML
+    private void onSortAscending() {
+        reapplyCurrentSort();
+    }
+
+    @FXML
+    private void onSortDescending() {
+        reapplyCurrentSort();
+    }
+
+    private void reapplyCurrentSort() {
+        if (!mediaTable.getSortOrder().isEmpty()) {
+            applySortOrder(mediaTable.getSortOrder().get(0));
+        }
+    }
+
+    private void applySortOrder(TableColumn<MediaFile, ?> column) {
+        TableColumn.SortType direction = (sortAscendingMenuItem != null && sortAscendingMenuItem.isSelected())
+            ? TableColumn.SortType.ASCENDING
+            : TableColumn.SortType.DESCENDING;
         mediaTable.getSortOrder().clear();
-        column.setSortType(sortType);
+        column.setSortType(direction);
         mediaTable.getSortOrder().add(column);
         mediaTable.sort();
         if (thumbnailViewActive) {
