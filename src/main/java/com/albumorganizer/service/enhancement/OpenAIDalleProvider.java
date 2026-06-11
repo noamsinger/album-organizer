@@ -107,14 +107,14 @@ public class OpenAIDalleProvider implements EnhancementProvider {
                     }
                 } catch (Exception ignored) {}
                 String technicalDetail = "Request Sent:\n" + cleanBody + "\n\nResponse Received (HTTP " + response.statusCode() + "):\n" + respBody;
-                return EnhancementResult.failure("OpenAI error " + response.statusCode() + ": " + errMsg, technicalDetail);
+                return EnhancementResult.failure("OpenAI error " + response.statusCode() + ": " + errMsg, technicalDetail, cleanBody, respBody);
             }
             JsonObject json = gson.fromJson(response.body(), JsonObject.class);
             String b64 = json.getAsJsonArray("data").get(0).getAsJsonObject().get("b64_json").getAsString();
             byte[] resultBytes = Base64.getDecoder().decode(b64);
             Path outputPath = ImageUtils.saveAsJpeg(resultBytes, request.inputPath(), getShortId(), request.outputDir());
             logger.info("Saved DALL·E enhanced image to {}", outputPath);
-            return EnhancementResult.ok(outputPath);
+            return EnhancementResult.ok(outputPath, cleanBody, response.body());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return EnhancementResult.failure("Request interrupted");

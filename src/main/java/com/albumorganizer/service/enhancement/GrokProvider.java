@@ -101,7 +101,7 @@ public class GrokProvider implements EnhancementProvider {
                 else if (errJson.has("message")) errMsg = errJson.get("message").getAsString();
             } catch (Exception ignored) {}
             String technicalDetail = "Request Sent:\n" + cleanBody + "\n\nResponse Received (HTTP " + resp.statusCode() + "):\n" + resp.body();
-            return EnhancementResult.failure("Grok API error " + resp.statusCode() + ": " + errMsg, technicalDetail);
+            return EnhancementResult.failure("Grok API error " + resp.statusCode() + ": " + errMsg, technicalDetail, cleanBody, resp.body());
         }
 
         JsonObject json = gson.fromJson(resp.body(), JsonObject.class);
@@ -110,7 +110,7 @@ public class GrokProvider implements EnhancementProvider {
 
         Path outputPath = ImageUtils.saveAsJpeg(resultBytes, request.inputPath(), getShortId(), request.outputDir());
         logger.info("Grok enhanced image saved to {}", outputPath);
-        return EnhancementResult.ok(outputPath);
+        return EnhancementResult.ok(outputPath, cleanBody, resp.body());
     }
 
     private String detectMime(Path path) {

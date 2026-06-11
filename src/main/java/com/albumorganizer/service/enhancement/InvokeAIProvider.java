@@ -71,10 +71,11 @@ public class InvokeAIProvider implements EnhancementProvider {
             if (enqueueResp.statusCode() != 200 && enqueueResp.statusCode() != 201) {
                 String responseBody = enqueueResp.body();
                 String technicalDetail = "Request Sent:\n" + cleanBody + "\n\nResponse Received (HTTP " + enqueueResp.statusCode() + "):\n" + responseBody;
-                return EnhancementResult.failure("InvokeAI enqueue error HTTP " + enqueueResp.statusCode(), technicalDetail);
+                return EnhancementResult.failure("InvokeAI enqueue error HTTP " + enqueueResp.statusCode(), technicalDetail, cleanBody, responseBody);
             }
             JsonObject enqueueJson = gson.fromJson(enqueueResp.body(), JsonObject.class);
             String batchId = enqueueJson.getAsJsonObject("batch").get("batch_id").getAsString();
+            String enqueueRespBody = enqueueResp.body();
 
             // Poll until complete
             String outputImageName = pollBatch(client, batchId);
@@ -93,7 +94,7 @@ public class InvokeAIProvider implements EnhancementProvider {
 
             Path outputPath = ImageUtils.saveAsJpeg(dlResp.body(), request.inputPath(), getShortId(), request.outputDir());
             logger.info("Saved InvokeAI enhanced image to {}", outputPath);
-            return EnhancementResult.ok(outputPath);
+            return EnhancementResult.ok(outputPath, cleanBody, enqueueRespBody);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return EnhancementResult.failure("Request interrupted");

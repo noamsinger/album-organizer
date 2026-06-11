@@ -59,7 +59,26 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
     private final Consumer<EnhancementProvider> onProviderUsed;
     private final Consumer<List<String>> onCheckedTitlesChanged;
     private final Consumer<String> onAdditionalPromptChanged;
-    private final Path outputDir; // null = next to original; non-null = use this dir
+    private final Path outputDir;
+    private final boolean debugProtocol;
+
+    // Set after a successful enhancement when debugProtocol is on
+    private EnhancementRequest completedRequest;
+    private EnhancementResult completedResult;
+    private double capturedFontScale = 1.0;
+
+    public record DebugData(EnhancementRequest request, EnhancementResult result, double fontScale) {
+        public String rawRequestBody() { return result.rawRequestBody(); }
+        public String rawResponseBody() { return result.rawResponseBody(); }
+    }
+
+    /** Returns debug data if debugProtocol is enabled and enhancement succeeded, otherwise null. */
+    public DebugData getDebugData() {
+        if (debugProtocol && completedRequest != null && completedResult != null) {
+            return new DebugData(completedRequest, completedResult, capturedFontScale);
+        }
+        return null;
+    }
 
     // record holding checkpoint selection + cached list to persist together
     public record ComfyUiCheckpointState(String selected, List<String> checkpoints) {}
@@ -77,6 +96,7 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
                              List<String> initialComfyUiCheckpoints,
                              String comfyUiBaseUrl,
                              ProviderParams initialProviderParams,
+                             boolean debugProtocol,
                              Consumer<List<NamedPrompt>> onPromptsChanged,
                              Consumer<EnhancementProvider> onProviderUsed,
                              Consumer<List<String>> onCheckedTitlesChanged,
@@ -89,6 +109,7 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
         this.onCheckedTitlesChanged = onCheckedTitlesChanged;
         this.onAdditionalPromptChanged = onAdditionalPromptChanged;
         this.outputDir = outputDir;
+        this.debugProtocol = debugProtocol;
         promptItems.addAll(savedPrompts);
 
         setTitle("Enhance with AI");
@@ -458,8 +479,12 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
         NamedPrompt previouslyClicked = lastClickedPrompt;
         lastClickedPrompt = null;
         for (NamedPrompt np : promptItems) {
+            boolean isDefault = com.albumorganizer.service.enhancement.ImageEnhancementService.isDefaultPrompt(np.title());
             CheckBox cb = new CheckBox(np.title());
-            Tooltip tt = new Tooltip(np.prompt());
+            if (isDefault) {
+                cb.setStyle("-fx-font-weight: bold;");
+            }
+            Tooltip tt = new Tooltip((isDefault ? "[Default] " : "") + np.prompt());
             tt.setMaxWidth(400);
             tt.setWrapText(true);
             tt.setShowDelay(javafx.util.Duration.millis(300));
@@ -527,7 +552,9 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
                 : "-fx-background-color: transparent;");
             CheckBox cb = promptCheckBoxes.get(entry.getKey());
             if (cb != null) {
-                cb.setStyle(selected ? "-fx-text-fill: white;" : "");
+                boolean isDefault = com.albumorganizer.service.enhancement.ImageEnhancementService.isDefaultPrompt(entry.getKey());
+                String boldPart = isDefault ? "-fx-font-weight: bold;" : "";
+                cb.setStyle(selected ? boldPart + " -fx-text-fill: white;" : boldPart);
             }
         }
     }
@@ -654,22 +681,29 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
         EnhancementProvider provider = providerCombo.getValue();
         if (provider == null) return;
 
-        // Collect all checked prompts in order, concatenate
+        // Collect all checked prompts in order, concatenate with title headers
         String basePrompt = null;
         if (provider.supportsPrompt()) {
-            List<String> parts = new ArrayList<>();
+            List<NamedPrompt> checked = new ArrayList<>();
             for (NamedPrompt np : promptItems) {
                 CheckBox cb = promptCheckBoxes.get(np.title());
-                if (cb != null && cb.isSelected()) parts.add(np.prompt());
+                if (cb != null && cb.isSelected()) checked.add(np);
             }
-            if (!parts.isEmpty()) basePrompt = String.join(". ", parts);
+            if (!checked.isEmpty()) {
+                StringBuilder sb = new StringBuilder();
+                for (NamedPrompt np : checked) {
+                    sb.append(np.title()).append(":\n").append(np.prompt()).append("\n---\n");
+                }
+                basePrompt = sb.toString().stripTrailing();
+            }
         }
 
         String prompt = basePrompt;
         if (additionalPrompt != null && !additionalPrompt.isBlank()) {
+            String ps = "P.S:\n" + additionalPrompt.trim();
             prompt = (prompt != null && !prompt.isBlank())
-                ? prompt + ". " + additionalPrompt.trim()
-                : additionalPrompt.trim();
+                ? prompt + "\n---\n" + ps
+                : ps;
         }
 
         Dimension targetSize = resolveSize(mediaFile, widthField, heightField);
@@ -712,6 +746,16 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
                 }
                 if (onProviderUsed != null) onProviderUsed.accept(provider);
                 setResult(result);
+                if (debugProtocol) {
+                    completedRequest = request;
+                    completedResult = result;
+                    try {
+                        String style = getDialogPane().getStyle();
+                        java.util.regex.Matcher m = java.util.regex.Pattern
+                            .compile("-fx-font-size:\\s*([0-9.]+)em").matcher(style);
+                        if (m.find()) capturedFontScale = Double.parseDouble(m.group(1));
+                    } catch (Exception ignored) {}
+                }
                 close();
             } else {
                 progressBar.setVisible(false);

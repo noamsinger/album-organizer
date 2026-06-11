@@ -24,7 +24,8 @@ public record EnhancementConfig(
     boolean invokeAiEnabled,
     String invokeAiUrl,
     List<NamedPrompt> savedPrompts,
-    List<String> checkedPromptTitles
+    List<String> checkedPromptTitles,
+    boolean debugProtocol
 ) {
 
     public static EnhancementConfig defaults() {
@@ -38,7 +39,8 @@ public record EnhancementConfig(
             false, "http://localhost:8188", "", List.of(),
             false, "http://localhost:9090",
             List.of(),
-            List.of()
+            List.of(),
+            false
         );
     }
 }

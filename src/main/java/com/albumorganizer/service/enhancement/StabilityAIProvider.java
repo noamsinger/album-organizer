@@ -95,10 +95,10 @@ public class StabilityAIProvider implements EnhancementProvider {
                 String msg = "Stability AI returned HTTP " + response.statusCode() + ": " + responseBody;
                 logger.error(msg);
                 String technicalDetail = "Request Sent:\n" + cleanBody + "\n\nResponse Received (HTTP " + response.statusCode() + "):\n" + responseBody;
-                return EnhancementResult.failure("Stability AI API error " + response.statusCode(), technicalDetail);
+                return EnhancementResult.failure("Stability AI API error " + response.statusCode(), technicalDetail, cleanBody, responseBody);
             }
             Path outputPath = writeOutput(request, response.body(), outputFormat);
-            return EnhancementResult.ok(outputPath);
+            return EnhancementResult.ok(outputPath, cleanBody, "(binary image response)");
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return EnhancementResult.failure("Request interrupted");

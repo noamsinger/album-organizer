@@ -86,14 +86,14 @@ public class StableDiffusionLocalProvider implements EnhancementProvider {
                 String msg = "SD WebUI returned HTTP " + response.statusCode() + ": " + respBody;
                 logger.error(msg);
                 String technicalDetail = "Request Sent:\n" + cleanBody + "\n\nResponse Received (HTTP " + response.statusCode() + "):\n" + respBody;
-                return EnhancementResult.failure("Stable Diffusion Local API error " + response.statusCode(), technicalDetail);
+                return EnhancementResult.failure("Stable Diffusion Local API error " + response.statusCode(), technicalDetail, cleanBody, respBody);
             }
             JsonObject json = gson.fromJson(response.body(), JsonObject.class);
             String b64Result = json.getAsJsonArray("images").get(0).getAsString();
             byte[] resultBytes = Base64.getDecoder().decode(b64Result);
             Path outputPath = ImageUtils.saveAsJpeg(resultBytes, request.inputPath(), getShortId(), request.outputDir());
             logger.info("Saved SD-enhanced image to {}", outputPath);
-            return EnhancementResult.ok(outputPath);
+            return EnhancementResult.ok(outputPath, cleanBody, response.body());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return EnhancementResult.failure("Request interrupted");

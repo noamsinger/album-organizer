@@ -125,7 +125,7 @@
             <VBox fx:id="progressPanel" visible="false" managed="false" styleClass="progress-panel" style="-fx-border-width: 1 0 0 0;">
                 <!-- Activity Log -->
                 <ListView fx:id="progressLogList" prefHeight="120"
-                          style="-fx-font-size: 11px; -fx-font-family: monospace; -fx-background-color: #f8f8f8;"/>
+                          style="-fx-font-size: 0.8em; -fx-font-family: monospace; -fx-background-color: #f8f8f8;"/>
                 <!-- Buttons row with progress bar on the left -->
                 <HBox styleClass="progress-buttons" spacing="10" alignment="CENTER_RIGHT">
                     <ProgressBar fx:id="progressBar" prefHeight="16" progress="0"

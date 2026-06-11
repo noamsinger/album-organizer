@@ -13,6 +13,7 @@ import java.awt.Desktop;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 public class SettingsDialog extends Dialog<SettingsDialog.Result> {
 
@@ -46,6 +47,9 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
     private final TextField realEsrganPathField;
     private final CheckBox comfyUiEnabledCheck;
     private final TextField comfyUiUrlField;
+
+    private boolean debugProtocolEnabled;
+    private boolean resetPromptsRequested = false;
 
     public SettingsDialog(AlbumOrganizerSettings currentSettings, EnhancementConfig currentEnhancement, double fontScale) {
         setTitle("Settings");
@@ -118,7 +122,41 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
         aiGrid.setPadding(new Insets(16, 20, 16, 16));
         int ai = 0;
 
-        // ═══ CLOUD ═══════════════════════════════════════════════════════════
+        // ═══ GLOBAL OPTIONS ═══════════════════════════════════════════════════
+        aiGrid.add(sectionBanner("⚙  Global Options"), 0, ai, 2, 1); ai++;
+
+        CheckBox debugProtocolCheck = new CheckBox("Enable Debug Protocol");
+        debugProtocolCheck.setSelected(currentEnhancement.debugProtocol());
+        debugProtocolCheck.setTooltip(new Tooltip(
+            "After each enhancement, show a debug dialog with the source image, result image,\n" +
+            "and the full request/response data (images replaced with XXXXXXXX)."));
+        debugProtocolEnabled = currentEnhancement.debugProtocol();
+        debugProtocolCheck.selectedProperty().addListener((obs, o, n) -> debugProtocolEnabled = n);
+        aiGrid.add(debugProtocolCheck, 0, ai, 2, 1); ai++;
+
+        // Reset default prompts button
+        Button resetPromptsBtn = new Button("Reset Default Prompts…");
+        resetPromptsBtn.setTooltip(new Tooltip(
+            "Remove all user-saved prompts and restore only the built-in default prompts."));
+        resetPromptsBtn.setStyle("-fx-font-size: 0.9em;");
+        resetPromptsBtn.setOnAction(e -> {
+            Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+            confirm.setTitle("Reset Default Prompts");
+            confirm.setHeaderText("Reset prompts to defaults?");
+            confirm.setContentText(
+                "This will remove all your saved prompts and restore only the built-in defaults.\n" +
+                "This action cannot be undone.");
+            confirm.showAndWait().ifPresent(btn -> {
+                if (btn == ButtonType.OK) {
+                    resetPromptsRequested = true;
+                    resetPromptsBtn.setText("✓ Will reset on Save");
+                    resetPromptsBtn.setDisable(true);
+                }
+            });
+        });
+        aiGrid.add(resetPromptsBtn, 0, ai, 2, 1); ai++;
+
+        aiGrid.add(new Separator(), 0, ai, 2, 1); ai++;
         aiGrid.add(sectionBanner("☁  Cloud (API-based)"), 0, ai, 2, 1); ai++;
         aiGrid.add(categoryLabel("Image enhancement"), 0, ai, 2, 1); ai++;
 
@@ -417,6 +455,25 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
     }
 
     private EnhancementConfig buildEnhancementConfig(EnhancementConfig current) {
+        List<com.albumorganizer.service.enhancement.NamedPrompt> prompts;
+        List<String> checkedTitles;
+        if (resetPromptsRequested) {
+            // Keep only user-added prompts (those not in the default set), remove all defaults.
+            // seedPrompts() will re-insert fresh defaults at the front on next open.
+            prompts = current.savedPrompts().stream()
+                .filter(p -> !com.albumorganizer.service.enhancement.ImageEnhancementService.isDefaultPrompt(p.title()))
+                .collect(java.util.stream.Collectors.toList());
+            // Also drop checked-titles that belonged to defaults
+            java.util.Set<String> keptTitles = prompts.stream()
+                .map(com.albumorganizer.service.enhancement.NamedPrompt::title)
+                .collect(java.util.stream.Collectors.toSet());
+            checkedTitles = current.checkedPromptTitles().stream()
+                .filter(keptTitles::contains)
+                .collect(java.util.stream.Collectors.toList());
+        } else {
+            prompts = current.savedPrompts();
+            checkedTitles = current.checkedPromptTitles();
+        }
         return new EnhancementConfig(
             stabilityEnabledCheck.isSelected(), stabilityKeyField.getText().trim(),
             openAiEnabledCheck.isSelected(), openAiKeyField.getText().trim(),
@@ -427,8 +484,9 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
             comfyUiEnabledCheck.isSelected(), comfyUiUrlField.getText().trim(),
             current.comfyUiCheckpoint(), current.comfyUiCheckpoints(),
             invokeAiEnabledCheck.isSelected(), invokeAiUrlField.getText().trim(),
-            current.savedPrompts(),
-            current.checkedPromptTitles()
+            prompts,
+            checkedTitles,
+            debugProtocolEnabled
         );
     }
 }

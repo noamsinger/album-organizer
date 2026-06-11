@@ -504,7 +504,8 @@ public class ConfigRepository {
             Boolean.parseBoolean(s.getOrDefault("invokeAiEnabled", "false")),
             s.getOrDefault("invokeAiUrl", "http://localhost:9090"),
             savedPrompts,
-            parseCheckedTitles(s.getOrDefault("checkedPromptTitles", ""))
+            parseCheckedTitles(s.getOrDefault("checkedPromptTitles", "")),
+            Boolean.parseBoolean(s.getOrDefault("debugProtocol", "false"))
         );
     }
 
@@ -551,6 +552,7 @@ public class ConfigRepository {
         } else {
             s.remove("checkedPromptTitles");
         }
+        s.put("debugProtocol", String.valueOf(cfg.debugProtocol()));
         config.put("Enhancement", s);
         writeIniFile(config);
         logger.debug("Saved enhancement config");

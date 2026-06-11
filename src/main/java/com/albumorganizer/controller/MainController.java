@@ -1123,6 +1123,7 @@ public class MainController {
             enhancementConfig.comfyUiCheckpoints(),
             enhancementConfig.comfyUiUrl(),
             new EnhancementDialog.ProviderParams(enhancementConfig.geminiTemperature(), enhancementConfig.grokModel()),
+            enhancementConfig.debugProtocol(),
             updatedPrompts -> {
                 EnhancementConfig current = configRepository.getEnhancementConfig();
                 EnhancementConfig updated = new EnhancementConfig(
@@ -1135,7 +1136,8 @@ public class MainController {
                     current.comfyUiEnabled(), current.comfyUiUrl(), current.comfyUiCheckpoint(), current.comfyUiCheckpoints(),
                     current.invokeAiEnabled(), current.invokeAiUrl(),
                     new ArrayList<>(updatedPrompts),
-                    lastCheckedPromptTitles
+                    lastCheckedPromptTitles,
+                    current.debugProtocol()
                 );
                 configRepository.setEnhancementConfig(updated);
             },
@@ -1153,7 +1155,8 @@ public class MainController {
                     current.comfyUiEnabled(), current.comfyUiUrl(), current.comfyUiCheckpoint(), current.comfyUiCheckpoints(),
                     current.invokeAiEnabled(), current.invokeAiUrl(),
                     current.savedPrompts(),
-                    lastCheckedPromptTitles
+                    lastCheckedPromptTitles,
+                    current.debugProtocol()
                 );
                 configRepository.setEnhancementConfig(updated);
             },
@@ -1169,7 +1172,8 @@ public class MainController {
                     current.realEsrganEnabled(), current.realEsrganModelPath(),
                     current.comfyUiEnabled(), current.comfyUiUrl(), state.selected(), state.checkpoints(),
                     current.invokeAiEnabled(), current.invokeAiUrl(),
-                    current.savedPrompts(), current.checkedPromptTitles()
+                    current.savedPrompts(), current.checkedPromptTitles(),
+                    current.debugProtocol()
                 ));
                 imageEnhancementService.reloadProviders();
             },
@@ -1184,7 +1188,8 @@ public class MainController {
                     current.realEsrganEnabled(), current.realEsrganModelPath(),
                     current.comfyUiEnabled(), current.comfyUiUrl(), current.comfyUiCheckpoint(), current.comfyUiCheckpoints(),
                     current.invokeAiEnabled(), current.invokeAiUrl(),
-                    current.savedPrompts(), current.checkedPromptTitles()
+                    current.savedPrompts(), current.checkedPromptTitles(),
+                    current.debugProtocol()
                 ));
             },
             outputDir);
@@ -1214,6 +1219,15 @@ public class MainController {
                 ErrorDialog.show("Enhancement Failed", "Enhancement failed", result.errorMessage());
             }
         });
+        EnhancementDialog.DebugData dbgData = dialog.getDebugData();
+        if (dbgData != null) {
+            DebugProtocolDialog dbg = new DebugProtocolDialog(
+                dbgData.request(), dbgData.result(),
+                dbgData.rawRequestBody(), dbgData.rawResponseBody(),
+                dbgData.fontScale());
+            dbg.initOwner(rootPane.getScene().getWindow());
+            dbg.showAndWait();
+        }
     }
 
     @FXML
@@ -1298,6 +1312,7 @@ public class MainController {
             enhancementConfig.comfyUiCheckpoints(),
             enhancementConfig.comfyUiUrl(),
             new EnhancementDialog.ProviderParams(enhancementConfig.geminiTemperature(), enhancementConfig.grokModel()),
+            enhancementConfig.debugProtocol(),
             updatedPrompts -> {
                 EnhancementConfig current = configRepository.getEnhancementConfig();
                 configRepository.setEnhancementConfig(new EnhancementConfig(
@@ -1309,7 +1324,8 @@ public class MainController {
                     current.realEsrganEnabled(), current.realEsrganModelPath(),
                     current.comfyUiEnabled(), current.comfyUiUrl(), current.comfyUiCheckpoint(), current.comfyUiCheckpoints(),
                     current.invokeAiEnabled(), current.invokeAiUrl(),
-                    new ArrayList<>(updatedPrompts), lastCheckedPromptTitles));
+                    new ArrayList<>(updatedPrompts), lastCheckedPromptTitles,
+                    current.debugProtocol()));
             },
             provider -> lastUsedProvider = provider,
             checkedTitles -> {
@@ -1324,7 +1340,8 @@ public class MainController {
                     current.realEsrganEnabled(), current.realEsrganModelPath(),
                     current.comfyUiEnabled(), current.comfyUiUrl(), current.comfyUiCheckpoint(), current.comfyUiCheckpoints(),
                     current.invokeAiEnabled(), current.invokeAiUrl(),
-                    current.savedPrompts(), lastCheckedPromptTitles));
+                    current.savedPrompts(), lastCheckedPromptTitles,
+                    current.debugProtocol()));
             },
             additionalPrompt -> lastAdditionalPrompt = additionalPrompt,
             state -> {
@@ -1338,7 +1355,8 @@ public class MainController {
                     current.realEsrganEnabled(), current.realEsrganModelPath(),
                     current.comfyUiEnabled(), current.comfyUiUrl(), state.selected(), state.checkpoints(),
                     current.invokeAiEnabled(), current.invokeAiUrl(),
-                    current.savedPrompts(), current.checkedPromptTitles()
+                    current.savedPrompts(), current.checkedPromptTitles(),
+                    current.debugProtocol()
                 ));
                 imageEnhancementService.reloadProviders();
             },
@@ -1353,7 +1371,8 @@ public class MainController {
                     current.realEsrganEnabled(), current.realEsrganModelPath(),
                     current.comfyUiEnabled(), current.comfyUiUrl(), current.comfyUiCheckpoint(), current.comfyUiCheckpoints(),
                     current.invokeAiEnabled(), current.invokeAiUrl(),
-                    current.savedPrompts(), current.checkedPromptTitles()
+                    current.savedPrompts(), current.checkedPromptTitles(),
+                    current.debugProtocol()
                 ));
             },
             aiDir);
@@ -1390,6 +1409,15 @@ public class MainController {
                 ErrorDialog.show("Enhancement Failed", "Enhancement failed", result.errorMessage());
             }
         });
+        EnhancementDialog.DebugData dbgData2 = dialog.getDebugData();
+        if (dbgData2 != null) {
+            DebugProtocolDialog dbg = new DebugProtocolDialog(
+                dbgData2.request(), dbgData2.result(),
+                dbgData2.rawRequestBody(), dbgData2.rawResponseBody(),
+                dbgData2.fontScale());
+            dbg.initOwner(rootPane.getScene().getWindow());
+            dbg.showAndWait();
+        }
     }
 
     @FXML
@@ -2839,7 +2867,7 @@ public class MainController {
 
         if (currentDisplayedFiles.isEmpty()) {
             Label emptyLabel = new Label("No files to display");
-            emptyLabel.setStyle("-fx-font-size: 16px; -fx-text-fill: gray;");
+            emptyLabel.setStyle("-fx-font-size: 1em; -fx-text-fill: gray;");
             thumbnailPane.getChildren().add(emptyLabel);
             return;
         }
@@ -2888,9 +2916,9 @@ public class MainController {
 
         // Style based on corrupted status
         if (mediaFile.isCorrupted()) {
-            filenameLabel.setStyle("-fx-font-size: 11px; -fx-text-alignment: center; -fx-text-fill: darkred;");
+            filenameLabel.setStyle("-fx-font-size: 0.7em; -fx-text-alignment: center; -fx-text-fill: darkred;");
         } else {
-            filenameLabel.setStyle("-fx-font-size: 11px; -fx-text-alignment: center;");
+            filenameLabel.setStyle("-fx-font-size: 0.7em; -fx-text-alignment: center;");
         }
 
         card.getChildren().addAll(imageContainer, filenameLabel);
@@ -3069,7 +3097,7 @@ public class MainController {
                 loadingSpinner.setVisible(false);
                 if (image == AUDIO_ONLY_SENTINEL) {
                     Label audioLabel = new Label("🎵");
-                    audioLabel.setStyle("-fx-font-size: 48px;");
+                    audioLabel.setStyle("-fx-font-size: 3em;");
                     imageView.setImage(null);
                     StackPane parent = (StackPane) imageView.getParent();
                     if (parent != null && !parent.getChildren().contains(audioLabel)) {
@@ -3080,7 +3108,7 @@ public class MainController {
                     applyOrientationRotation(imageView, mediaFile.getOrientation());
                 } else {
                     Label errorLabel = new Label("?");
-                    errorLabel.setStyle("-fx-font-size: 48px; -fx-text-fill: #999;");
+                    errorLabel.setStyle("-fx-font-size: 3em; -fx-text-fill: #999;");
                     imageView.setImage(null);
                 }
                 onThumbnailCompleted(totalFiles, thumbnailsCompleted);
