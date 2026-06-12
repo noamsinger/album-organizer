@@ -102,6 +102,10 @@ public class ThumbnailService {
                 logger.debug("Failed to read image directly: {}", file.getFileName(), e);
                 image = null;
             }
+            // ImageIO returns null for formats it doesn't recognize (e.g. WebP with wrong extension)
+            if (image == null) {
+                image = convertViaSips(file);
+            }
         }
 
         if (image == null) {
@@ -409,8 +413,8 @@ public class ThumbnailService {
         String name = file.getFileName().toString().toLowerCase();
         boolean isMac = System.getProperty("os.name", "").toLowerCase().contains("mac");
         if (isMac) {
-            return name.endsWith(".heic") || name.endsWith(".heif");
+            return name.endsWith(".heic") || name.endsWith(".heif") || name.endsWith(".webp");
         }
-        return false;
+        return name.endsWith(".webp");
     }
 }

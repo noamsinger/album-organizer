@@ -21,13 +21,14 @@ class ImageUtils {
      */
     static byte[] loadAsJpeg(Path path) throws IOException {
         String name = path.getFileName().toString().toLowerCase();
-        boolean isHeic = name.endsWith(".heic") || name.endsWith(".heif");
+        boolean needsSips = name.endsWith(".heic") || name.endsWith(".heif") || name.endsWith(".webp");
 
         BufferedImage img;
-        if (isHeic) {
-            img = readHeic(path);
+        if (needsSips) {
+            img = readViaSips(path);
         } else {
             img = ImageIO.read(path.toFile());
+            if (img == null) img = readViaSips(path);
         }
         if (img == null) throw new IOException("Cannot read image: " + path.getFileName());
 
@@ -57,13 +58,14 @@ class ImageUtils {
      */
     static byte[] loadAndResize(Path path) throws IOException {
         String name = path.getFileName().toString().toLowerCase();
-        boolean isHeic = name.endsWith(".heic") || name.endsWith(".heif");
+        boolean needsSips = name.endsWith(".heic") || name.endsWith(".heif") || name.endsWith(".webp");
 
         BufferedImage img;
-        if (isHeic) {
-            img = readHeic(path);
+        if (needsSips) {
+            img = readViaSips(path);
         } else {
             img = ImageIO.read(path.toFile());
+            if (img == null) img = readViaSips(path);
         }
         if (img == null) throw new IOException("Cannot read image: " + path.getFileName());
 
@@ -123,7 +125,7 @@ class ImageUtils {
         return baos.toByteArray();
     }
 
-    private static BufferedImage readHeic(Path path) throws IOException {
+    private static BufferedImage readViaSips(Path path) throws IOException {
         if (!System.getProperty("os.name", "").toLowerCase().contains("mac")) {
             return null;
         }
