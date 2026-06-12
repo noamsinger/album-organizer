@@ -8,6 +8,8 @@ import javafx.scene.Node;
 import javafx.scene.control.*;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
+import javafx.scene.input.Clipboard;
+import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.*;
 import javafx.scene.text.FontWeight;
 
@@ -80,6 +82,23 @@ public class DebugProtocolDialog extends Dialog<Void> {
         getDialogPane().setContent(mainSplit);
         getDialogPane().setPrefWidth(1100);
         getDialogPane().setPrefHeight(750);
+
+        // "Copy Analysis Info" button in the button bar
+        ButtonType copyBtnType = new ButtonType("Copy Analysis Info", ButtonBar.ButtonData.RIGHT);
+        getDialogPane().getButtonTypes().add(copyBtnType);
+        Button copyBtn = (Button) getDialogPane().lookupButton(copyBtnType);
+        String requestText = buildRequestText(request, rawRequestJson);
+        String responseText = buildResponseText(result, rawResponseJson);
+        copyBtn.setOnAction(e -> {
+            String analysis = "# AI Enhancement Debug Report\n\n" +
+                requestText + "\n\n" + responseText;
+            ClipboardContent cc = new ClipboardContent();
+            cc.putString(analysis);
+            Clipboard.getSystemClipboard().setContent(cc);
+            copyBtn.setText("Copied!");
+            e.consume();
+        });
+
         setResultConverter(btn -> null);
     }
 

@@ -1,7 +1,8 @@
 package com.albumorganizer;
 
 import com.albumorganizer.controller.MainController;
-import com.albumorganizer.repository.ConfigRepository;
+import com.albumorganizer.model.AppUsage;
+import com.albumorganizer.repository.UsageRepository;
 import javafx.application.Application;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
@@ -20,7 +21,7 @@ import java.io.IOException;
 public class AlbumOrganizerApp extends Application {
 
     private static final Logger logger = LoggerFactory.getLogger(AlbumOrganizerApp.class);
-    private ConfigRepository configRepository;
+    private UsageRepository usageRepository;
     private MainController mainController;
 
     @Override
@@ -28,7 +29,8 @@ public class AlbumOrganizerApp extends Application {
         logger.info("Starting Album Organizer application");
 
         try {
-            configRepository = new ConfigRepository();
+            usageRepository = new UsageRepository();
+            AppUsage usage = usageRepository.load();
 
             // Set application icon
             try {
@@ -48,8 +50,8 @@ public class AlbumOrganizerApp extends Application {
 
             // Create scene
             Scene scene = new Scene(root,
-                configRepository.getWindowWidth(),
-                configRepository.getWindowHeight());
+                usage.windowWidth(),
+                usage.windowHeight());
 
             // Set scene fill to pale orange for window chrome
             scene.setFill(javafx.scene.paint.Color.web("#FFE5CC"));
@@ -68,8 +70,8 @@ public class AlbumOrganizerApp extends Application {
             primaryStage.setScene(scene);
 
             // Restore window position if saved
-            double x = configRepository.getWindowX();
-            double y = configRepository.getWindowY();
+            double x = usage.windowX();
+            double y = usage.windowY();
             if (x >= 0 && y >= 0) {
                 primaryStage.setX(x);
                 primaryStage.setY(y);
@@ -79,10 +81,17 @@ public class AlbumOrganizerApp extends Application {
             primaryStage.setOnCloseRequest(event -> {
                 logger.debug("Window close requested");
                 try {
-                    configRepository.setWindowWidth(primaryStage.getWidth());
-                    configRepository.setWindowHeight(primaryStage.getHeight());
-                    configRepository.setWindowX(primaryStage.getX());
-                    configRepository.setWindowY(primaryStage.getY());
+                    AppUsage current = usageRepository.load();
+                    usageRepository.save(new AppUsage(
+                        current.fontSizeFactor(), current.lastSelectedFolder(),
+                        current.thumbnailView(), current.showArchivesInTree(),
+                        current.savedPrompts(), current.checkedPromptTitles(),
+                        current.comfyUiCheckpoint(), current.comfyUiCheckpoints(),
+                        primaryStage.getWidth(), primaryStage.getHeight(),
+                        primaryStage.getX(), primaryStage.getY(),
+                        current.lastScanDateEpochMilli(),
+                        current.sortField(), current.sortAscending()
+                    ));
                     logger.debug("Window position saved");
 
                     // Save snapshot with timeout to prevent hang

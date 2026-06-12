@@ -9,13 +9,17 @@ public record EnhancementRequest(
     String prompt,
     Dimension targetSize,
     Path outputDir,
-    Map<String, String> params
+    Map<String, String> params,
+    Path customOutputPath
 ) {
     public EnhancementRequest(Path inputPath, String prompt, Dimension targetSize) {
-        this(inputPath, prompt, targetSize, null, Map.of());
+        this(inputPath, prompt, targetSize, null, Map.of(), null);
     }
     public EnhancementRequest(Path inputPath, String prompt, Dimension targetSize, Path outputDir) {
-        this(inputPath, prompt, targetSize, outputDir, Map.of());
+        this(inputPath, prompt, targetSize, outputDir, Map.of(), null);
+    }
+    public EnhancementRequest(Path inputPath, String prompt, Dimension targetSize, Path outputDir, Map<String, String> params) {
+        this(inputPath, prompt, targetSize, outputDir, params, null);
     }
 
     public String param(String key) { return params != null ? params.get(key) : null; }

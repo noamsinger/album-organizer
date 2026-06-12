@@ -34,7 +34,7 @@ public class GrokProvider implements EnhancementProvider {
     }
 
     @Override public String getName()         { return "Grok xAI (Cloud)"; }
-    @Override public String getShortId()      { return "grok"; }
+    @Override public String getShortId()      { return "Grok"; }
     @Override public boolean isConfigured()   { return apiKey != null && !apiKey.isBlank(); }
     @Override public boolean supportsPrompt() { return true; }
     @Override public String estimatedCostPerImage() { return "~$0.05 / image (quality) · ~$0.02 (standard)"; }
@@ -108,7 +108,9 @@ public class GrokProvider implements EnhancementProvider {
         String b64 = json.getAsJsonArray("data").get(0).getAsJsonObject().get("b64_json").getAsString();
         byte[] resultBytes = Base64.getDecoder().decode(b64);
 
-        Path outputPath = ImageUtils.saveAsJpeg(resultBytes, request.inputPath(), getShortId(), request.outputDir());
+        Path outputPath = request.customOutputPath() != null
+            ? ImageUtils.saveAsJpeg(resultBytes, request.customOutputPath())
+            : ImageUtils.saveAsJpeg(resultBytes, request.inputPath(), getShortId(), request.outputDir());
         logger.info("Grok enhanced image saved to {}", outputPath);
         return EnhancementResult.ok(outputPath, cleanBody, resp.body());
     }

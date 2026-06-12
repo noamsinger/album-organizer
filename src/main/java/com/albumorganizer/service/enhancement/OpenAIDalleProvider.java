@@ -34,7 +34,7 @@ public class OpenAIDalleProvider implements EnhancementProvider {
     }
 
     @Override
-    public String getShortId() { return "dalle"; }
+    public String getShortId() { return "DALLE"; }
 
     @Override
     public boolean isConfigured() {
@@ -112,7 +112,9 @@ public class OpenAIDalleProvider implements EnhancementProvider {
             JsonObject json = gson.fromJson(response.body(), JsonObject.class);
             String b64 = json.getAsJsonArray("data").get(0).getAsJsonObject().get("b64_json").getAsString();
             byte[] resultBytes = Base64.getDecoder().decode(b64);
-            Path outputPath = ImageUtils.saveAsJpeg(resultBytes, request.inputPath(), getShortId(), request.outputDir());
+            Path outputPath = request.customOutputPath() != null
+                ? ImageUtils.saveAsJpeg(resultBytes, request.customOutputPath())
+                : ImageUtils.saveAsJpeg(resultBytes, request.inputPath(), getShortId(), request.outputDir());
             logger.info("Saved DALL·E enhanced image to {}", outputPath);
             return EnhancementResult.ok(outputPath, cleanBody, response.body());
         } catch (InterruptedException e) {

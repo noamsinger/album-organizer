@@ -8,8 +8,11 @@ import com.albumorganizer.model.MediaType;
 import com.albumorganizer.model.FileIndexEntry;
 import javafx.collections.FXCollections;
 import com.albumorganizer.model.AlbumOrganizerSettings;
+import com.albumorganizer.model.AppSettings;
+import com.albumorganizer.model.AppUsage;
 import com.albumorganizer.model.ScanResult;
-import com.albumorganizer.repository.ConfigRepository;
+import com.albumorganizer.repository.SettingsRepository;
+import com.albumorganizer.repository.UsageRepository;
 import com.albumorganizer.repository.RecycleBinRepository;
 import com.albumorganizer.repository.SnapshotRepository;
 import com.albumorganizer.service.ScannerService;
@@ -126,7 +129,8 @@ public class MainController {
 
     private final ScannerService scannerService;
     private final DirectoryScanService directoryScanService;
-    private final ConfigRepository configRepository;
+    private final SettingsRepository settingsRepository;
+    private final UsageRepository usageRepository;
     private final SnapshotRepository snapshotRepository;
     private final ThumbnailService thumbnailService;
     private final ArchiveScanService archiveScanService;
@@ -149,16 +153,19 @@ public class MainController {
     private String lastUsedPromptTitle = null; // kept for back-compat, unused
     private String lastAdditionalPrompt = "";
     private List<String> lastCheckedPromptTitles = new ArrayList<>();
+    private String currentSortField = "name";
+    private boolean currentSortAscending = true;
     private final RecycleBinRepository recycleBinRepository = new RecycleBinRepository();
 
     public MainController() {
         this.scannerService = new ScannerService();
         this.directoryScanService = new DirectoryScanService();
-        this.configRepository = new ConfigRepository();
+        this.settingsRepository = new SettingsRepository();
+        this.usageRepository = new UsageRepository();
         this.snapshotRepository = new SnapshotRepository();
         this.thumbnailService = new ThumbnailService();
         this.archiveScanService = new ArchiveScanService();
-        this.imageEnhancementService = new ImageEnhancementService(configRepository);
+        this.imageEnhancementService = new ImageEnhancementService(settingsRepository);
         this.fileIndex = new HashMap<>();
         this.baseFolders = new ArrayList<>();
         this.currentlyScannedFolders = new ArrayList<>();
@@ -190,7 +197,10 @@ public class MainController {
         setupKeyboardShortcuts();
 
         // Load settings including font size and target folder FIRST
-        settings = configRepository.getOrganizeSettings();
+        AppSettings appSettings = settingsRepository.load();
+        AppUsage appUsage = usageRepository.load();
+        settings = appSettings.toOrganizeSettings();
+        appUsage.applyTo(settings);
         applyDefaultSpecialFolders();
         applyFontSize();
 
@@ -225,9 +235,41 @@ public class MainController {
         // Restore show-archives setting
         showArchivesMenuItem.setSelected(settings.isShowArchivesInTree());
 
+        // Restore sort state
+        currentSortField = appUsage.sortField() != null ? appUsage.sortField() : "name";
+        currentSortAscending = appUsage.sortAscending();
+        restoreSortMenuSelection();
+
         syncLogLevelMenu();
 
         logger.debug("MainController initialized");
+    }
+
+    private void restoreSortMenuSelection() {
+        if (sortAscendingMenuItem != null) sortAscendingMenuItem.setSelected(currentSortAscending);
+        if (sortDescendingMenuItem != null) sortDescendingMenuItem.setSelected(!currentSortAscending);
+        RadioMenuItem sortItem = switch (currentSortField) {
+            case "dateTaken"   -> sortByDateTakenMenuItem;
+            case "date"        -> sortByDateMenuItem;
+            case "type"        -> sortByTypeMenuItem;
+            case "duration"    -> sortByDurationMenuItem;
+            case "resolution"  -> sortByResolutionMenuItem;
+            default            -> sortByNameMenuItem;
+        };
+        if (sortItem != null) sortItem.setSelected(true);
+        // Apply the saved sort to the table
+        TableColumn<MediaFile, ?> col = switch (currentSortField) {
+            case "dateTaken"   -> dateTakenColumn;
+            case "date"        -> dateColumn;
+            case "type"        -> typeColumn;
+            case "duration"    -> durationColumn;
+            case "resolution"  -> resolutionColumn;
+            default            -> filenameColumn;
+        };
+        TableColumn.SortType direction = currentSortAscending
+            ? TableColumn.SortType.ASCENDING : TableColumn.SortType.DESCENDING;
+        col.setSortType(direction);
+        mediaTable.getSortOrder().setAll(col);
     }
 
     private void setupTableColumns() {
@@ -453,6 +495,14 @@ public class MainController {
             }
         });
 
+        MenuItem permanentDeleteItem = new MenuItem("Permanently Delete");
+        permanentDeleteItem.setOnAction(e -> {
+            MediaFile selected = mediaTable.getSelectionModel().getSelectedItem();
+            if (selected != null) {
+                permanentlyDeleteFile(selected);
+            }
+        });
+
         MenuItem restoreFromBinItem = new MenuItem("Restore to Original Location");
         restoreFromBinItem.setOnAction(e -> {
             MediaFile selected = mediaTable.getSelectionModel().getSelectedItem();
@@ -487,6 +537,8 @@ public class MainController {
             boolean isInBin = selected != null && hasBin
                 && selected.getAbsolutePath().startsWith(settings.getRecycleBinFolder());
             deleteFileItem.setDisable(selected == null || !hasBin || isInBin);
+            permanentDeleteItem.setVisible(isInBin);
+            permanentDeleteItem.setDisable(selected == null);
 
             restoreFromBinItem.setVisible(isInBin);
             restoreFromBinItem.setDisable(selected == null || !recycleBinRepository.isInBin(selected.getAbsolutePath()));
@@ -516,6 +568,7 @@ public class MainController {
             new SeparatorMenuItem(),
             removeOtherDuplicatesItem,
             deleteFileItem,
+            permanentDeleteItem,
             restoreFromBinItem,
             new SeparatorMenuItem(),
             organizeFileItem,
@@ -585,7 +638,7 @@ public class MainController {
         MenuItem clearRecycleBinItem = new MenuItem("Unset as Recycle-Bin Folder");
         clearRecycleBinItem.setOnAction(e -> {
             settings.setRecycleBinFolder(null);
-            configRepository.setOrganizeSettings(settings);
+            saveSettings();
             buildDirectoryTree();
             statusLabel.setText("Recycle-bin folder cleared");
         });
@@ -767,7 +820,7 @@ public class MainController {
 
         currentSelectedDirectory = directory;
         settings.setLastSelectedFolder(directory.toString());
-        configRepository.setOrganizeSettings(settings);
+        saveUsage();
         logger.debug("Directory selected: {}", directory);
 
         // Show loading indicator
@@ -1010,9 +1063,44 @@ public class MainController {
         }
     }
 
+    private void saveSettings() {
+        EnhancementConfig eCfg = buildCurrentEnhancementConfig();
+        settingsRepository.save(AppSettings.from(settings, eCfg, baseFolders));
+    }
+
+    private void saveUsage() {
+        EnhancementConfig eCfg = buildCurrentEnhancementConfig();
+        AppUsage current = usageRepository.load();
+        usageRepository.save(AppUsage.from(settings, eCfg,
+            current.windowWidth(), current.windowHeight(),
+            current.windowX(), current.windowY(),
+            current.lastScanDateEpochMilli(),
+            currentSortField, currentSortAscending));
+    }
+
+    private EnhancementConfig buildCurrentEnhancementConfig() {
+        AppSettings s = settingsRepository.load();
+        AppUsage u = usageRepository.load();
+        return s.toEnhancementConfig(u);
+    }
+
+    private void saveLastScanDate() {
+        AppUsage current = usageRepository.load();
+        usageRepository.save(new AppUsage(
+            current.fontSizeFactor(), current.lastSelectedFolder(),
+            current.thumbnailView(), current.showArchivesInTree(),
+            current.savedPrompts(), current.checkedPromptTitles(),
+            current.comfyUiCheckpoint(), current.comfyUiCheckpoints(),
+            current.windowWidth(), current.windowHeight(),
+            current.windowX(), current.windowY(),
+            System.currentTimeMillis(),
+            current.sortField(), current.sortAscending()
+        ));
+    }
+
     private void setTargetFolder(Path path) {
         settings.setTargetFolder(path);
-        configRepository.setOrganizeSettings(settings);
+        saveSettings();
         buildDirectoryTree(); // Rebuild to update colors
         statusLabel.setText("Target folder set: " + path.getFileName());
         logger.info("Set target folder: {}", path);
@@ -1020,7 +1108,7 @@ public class MainController {
 
     private void clearTargetFolder() {
         settings.setTargetFolder(null);
-        configRepository.setOrganizeSettings(settings);
+        saveSettings();
         buildDirectoryTree(); // Rebuild to update colors
         statusLabel.setText("Target folder cleared");
         logger.info("Cleared target folder");
@@ -1040,7 +1128,7 @@ public class MainController {
 
     private void removeAlbumFolder(Path path) {
         baseFolders.remove(path);
-        configRepository.setBaseFolders(baseFolders);
+        saveSettings();
 
         // Remove files from removed folder from the index
         fileIndex.values().forEach(entries ->
@@ -1072,7 +1160,7 @@ public class MainController {
     @FXML
     private void onSettings() {
         double fontScale = Math.pow(2.0, settings.getFontSizeFactor() / 4.0);
-        SettingsDialog dialog = new SettingsDialog(settings, configRepository.getEnhancementConfig(), fontScale);
+        SettingsDialog dialog = new SettingsDialog(settings, buildCurrentEnhancementConfig(), fontScale);
         dialog.initOwner(rootPane.getScene().getWindow());
 
         dialog.showAndWait().ifPresent(result -> {
@@ -1083,8 +1171,21 @@ public class MainController {
             newSettings.setFontSizeFactor(settings.getFontSizeFactor());
             newSettings.setShowArchivesInTree(settings.isShowArchivesInTree());
             settings = newSettings;
-            configRepository.setOrganizeSettings(settings);
-            configRepository.setEnhancementConfig(result.enhancementConfig());
+            EnhancementConfig newEnhCfg = result.enhancementConfig();
+            // Save provider settings to settings file; keep usage (prompts, checkpoints) from usage file
+            AppUsage currentUsage = usageRepository.load();
+            settingsRepository.save(AppSettings.from(settings, newEnhCfg, baseFolders));
+            // Reset prompts in usage file if the settings dialog changed them
+            usageRepository.save(new AppUsage(
+                currentUsage.fontSizeFactor(), currentUsage.lastSelectedFolder(),
+                currentUsage.thumbnailView(), currentUsage.showArchivesInTree(),
+                newEnhCfg.savedPrompts(), currentUsage.checkedPromptTitles(),
+                currentUsage.comfyUiCheckpoint(), currentUsage.comfyUiCheckpoints(),
+                currentUsage.windowWidth(), currentUsage.windowHeight(),
+                currentUsage.windowX(), currentUsage.windowY(),
+                currentUsage.lastScanDateEpochMilli(),
+                currentUsage.sortField(), currentUsage.sortAscending()
+            ));
             imageEnhancementService.reloadProviders();
             statusLabel.setText("Settings saved");
             logger.info("Settings updated: mode={}, createYear={}, createMonth={}, createDay={}, splitLowRes={}, splitMedRes={}",
@@ -1095,7 +1196,7 @@ public class MainController {
 
     private void openEnhancementDialog(MediaFile mediaFile) {
         double fontScale = Math.pow(2.0, settings.getFontSizeFactor() / 4.0);
-        EnhancementConfig enhancementConfig = configRepository.getEnhancementConfig();
+        EnhancementConfig enhancementConfig = buildCurrentEnhancementConfig();
         List<NamedPrompt> savedPrompts = ImageEnhancementService.seedPrompts(enhancementConfig.savedPrompts());
         // Load persisted checked titles if we haven't overridden them yet this session
         if (lastCheckedPromptTitles.isEmpty() && !enhancementConfig.checkedPromptTitles().isEmpty()) {
@@ -1125,71 +1226,54 @@ public class MainController {
             new EnhancementDialog.ProviderParams(enhancementConfig.geminiTemperature(), enhancementConfig.grokModel()),
             enhancementConfig.debugProtocol(),
             updatedPrompts -> {
-                EnhancementConfig current = configRepository.getEnhancementConfig();
-                EnhancementConfig updated = new EnhancementConfig(
-                    current.stabilityAiEnabled(), current.stabilityAiKey(),
-                    current.openAiEnabled(), current.openAiKey(),
-                    current.geminiEnabled(), current.geminiKey(), current.geminiTemperature(),
-                    current.grokEnabled(), current.grokKey(), current.grokModel(),
-                    current.sdLocalEnabled(), current.sdLocalUrl(),
-                    current.realEsrganEnabled(), current.realEsrganModelPath(),
-                    current.comfyUiEnabled(), current.comfyUiUrl(), current.comfyUiCheckpoint(), current.comfyUiCheckpoints(),
-                    current.invokeAiEnabled(), current.invokeAiUrl(),
-                    new ArrayList<>(updatedPrompts),
-                    lastCheckedPromptTitles,
-                    current.debugProtocol()
-                );
-                configRepository.setEnhancementConfig(updated);
+                AppUsage u = usageRepository.load();
+                usageRepository.save(new AppUsage(
+                    u.fontSizeFactor(), u.lastSelectedFolder(), u.thumbnailView(), u.showArchivesInTree(),
+                    new ArrayList<>(updatedPrompts), lastCheckedPromptTitles,
+                    u.comfyUiCheckpoint(), u.comfyUiCheckpoints(),
+                    u.windowWidth(), u.windowHeight(), u.windowX(), u.windowY(), u.lastScanDateEpochMilli(),
+                    u.sortField(), u.sortAscending()
+                ));
             },
             provider -> lastUsedProvider = provider,
             checkedTitles -> {
                 lastCheckedPromptTitles = new ArrayList<>(checkedTitles);
-                EnhancementConfig current = configRepository.getEnhancementConfig();
-                EnhancementConfig updated = new EnhancementConfig(
-                    current.stabilityAiEnabled(), current.stabilityAiKey(),
-                    current.openAiEnabled(), current.openAiKey(),
-                    current.geminiEnabled(), current.geminiKey(), current.geminiTemperature(),
-                    current.grokEnabled(), current.grokKey(), current.grokModel(),
-                    current.sdLocalEnabled(), current.sdLocalUrl(),
-                    current.realEsrganEnabled(), current.realEsrganModelPath(),
-                    current.comfyUiEnabled(), current.comfyUiUrl(), current.comfyUiCheckpoint(), current.comfyUiCheckpoints(),
-                    current.invokeAiEnabled(), current.invokeAiUrl(),
-                    current.savedPrompts(),
-                    lastCheckedPromptTitles,
-                    current.debugProtocol()
-                );
-                configRepository.setEnhancementConfig(updated);
+                AppUsage u = usageRepository.load();
+                usageRepository.save(new AppUsage(
+                    u.fontSizeFactor(), u.lastSelectedFolder(), u.thumbnailView(), u.showArchivesInTree(),
+                    u.savedPrompts(), lastCheckedPromptTitles,
+                    u.comfyUiCheckpoint(), u.comfyUiCheckpoints(),
+                    u.windowWidth(), u.windowHeight(), u.windowX(), u.windowY(), u.lastScanDateEpochMilli(),
+                    u.sortField(), u.sortAscending()
+                ));
             },
             additionalPrompt -> lastAdditionalPrompt = additionalPrompt,
             state -> {
-                EnhancementConfig current = configRepository.getEnhancementConfig();
-                configRepository.setEnhancementConfig(new EnhancementConfig(
-                    current.stabilityAiEnabled(), current.stabilityAiKey(),
-                    current.openAiEnabled(), current.openAiKey(),
-                    current.geminiEnabled(), current.geminiKey(), current.geminiTemperature(),
-                    current.grokEnabled(), current.grokKey(), current.grokModel(),
-                    current.sdLocalEnabled(), current.sdLocalUrl(),
-                    current.realEsrganEnabled(), current.realEsrganModelPath(),
-                    current.comfyUiEnabled(), current.comfyUiUrl(), state.selected(), state.checkpoints(),
-                    current.invokeAiEnabled(), current.invokeAiUrl(),
-                    current.savedPrompts(), current.checkedPromptTitles(),
-                    current.debugProtocol()
+                AppUsage u = usageRepository.load();
+                usageRepository.save(new AppUsage(
+                    u.fontSizeFactor(), u.lastSelectedFolder(), u.thumbnailView(), u.showArchivesInTree(),
+                    u.savedPrompts(), u.checkedPromptTitles(),
+                    state.selected(), state.checkpoints(),
+                    u.windowWidth(), u.windowHeight(), u.windowX(), u.windowY(), u.lastScanDateEpochMilli(),
+                    u.sortField(), u.sortAscending()
                 ));
                 imageEnhancementService.reloadProviders();
             },
             pp -> {
-                EnhancementConfig current = configRepository.getEnhancementConfig();
-                configRepository.setEnhancementConfig(new EnhancementConfig(
-                    current.stabilityAiEnabled(), current.stabilityAiKey(),
-                    current.openAiEnabled(), current.openAiKey(),
-                    current.geminiEnabled(), current.geminiKey(), pp.geminiTemperature(),
-                    current.grokEnabled(), current.grokKey(), pp.grokModel(),
-                    current.sdLocalEnabled(), current.sdLocalUrl(),
-                    current.realEsrganEnabled(), current.realEsrganModelPath(),
-                    current.comfyUiEnabled(), current.comfyUiUrl(), current.comfyUiCheckpoint(), current.comfyUiCheckpoints(),
-                    current.invokeAiEnabled(), current.invokeAiUrl(),
-                    current.savedPrompts(), current.checkedPromptTitles(),
-                    current.debugProtocol()
+                AppSettings s = settingsRepository.load();
+                settingsRepository.save(new AppSettings(
+                    s.organizeMode(), s.createYearFolder(), s.createMonthFolder(), s.createDayFolder(),
+                    s.splitLowRes(), s.splitMedRes(), s.lowResThresholdPixels(), s.hiResThresholdPixels(),
+                    s.targetFolder(), s.aiGeneratedFolder(), s.recycleBinFolder(), s.albumFolders(),
+                    s.stabilityAiEnabled(), s.stabilityAiKey(),
+                    s.openAiEnabled(), s.openAiKey(),
+                    s.geminiEnabled(), s.geminiKey(), pp.geminiTemperature(),
+                    s.grokEnabled(), s.grokKey(), pp.grokModel(),
+                    s.sdLocalEnabled(), s.sdLocalUrl(),
+                    s.realEsrganEnabled(), s.realEsrganModelPath(),
+                    s.comfyUiEnabled(), s.comfyUiUrl(),
+                    s.invokeAiEnabled(), s.invokeAiUrl(),
+                    s.debugProtocol()
                 ));
             },
             outputDir);
@@ -1258,13 +1342,13 @@ public class MainController {
         javafx.scene.image.Image fxImage = cb.getImage();
         if (fxImage == null) return;
 
-        // Write clipboard image to a temp file in the AI-Generated folder
+        // Write clipboard image to a temp file (system temp — not in aiDir, so it won't appear in scans)
         Path aiDir = settings.getAiGeneratedFolder();
         long epoch = System.currentTimeMillis() / 1000;
         Path tempInput;
         try {
             java.nio.file.Files.createDirectories(aiDir);
-            tempInput = aiDir.resolve("Clipboard-" + epoch + "-input.jpg");
+            tempInput = java.nio.file.Files.createTempFile("album-clipboard-", ".jpg");
             java.awt.image.BufferedImage awtImage = javafx.embed.swing.SwingFXUtils.fromFXImage(fxImage, null);
             if (awtImage.getType() != java.awt.image.BufferedImage.TYPE_INT_RGB) {
                 java.awt.image.BufferedImage rgb = new java.awt.image.BufferedImage(
@@ -1282,7 +1366,7 @@ public class MainController {
         }
 
         final Path tempInputFinal = tempInput;
-        final long epochFinal = epoch;
+
 
         // Build a synthetic MediaFile for the clipboard image
         com.albumorganizer.model.MediaFile clipMediaFile = new com.albumorganizer.model.MediaFile(
@@ -1294,7 +1378,7 @@ public class MainController {
         );
 
         double fontScale = Math.pow(2.0, settings.getFontSizeFactor() / 4.0);
-        EnhancementConfig enhancementConfig = configRepository.getEnhancementConfig();
+        EnhancementConfig enhancementConfig = buildCurrentEnhancementConfig();
         List<NamedPrompt> savedPrompts = ImageEnhancementService.seedPrompts(enhancementConfig.savedPrompts());
         if (lastCheckedPromptTitles.isEmpty() && !enhancementConfig.checkedPromptTitles().isEmpty()) {
             lastCheckedPromptTitles = new ArrayList<>(enhancementConfig.checkedPromptTitles());
@@ -1314,101 +1398,75 @@ public class MainController {
             new EnhancementDialog.ProviderParams(enhancementConfig.geminiTemperature(), enhancementConfig.grokModel()),
             enhancementConfig.debugProtocol(),
             updatedPrompts -> {
-                EnhancementConfig current = configRepository.getEnhancementConfig();
-                configRepository.setEnhancementConfig(new EnhancementConfig(
-                    current.stabilityAiEnabled(), current.stabilityAiKey(),
-                    current.openAiEnabled(), current.openAiKey(),
-                    current.geminiEnabled(), current.geminiKey(), current.geminiTemperature(),
-                    current.grokEnabled(), current.grokKey(), current.grokModel(),
-                    current.sdLocalEnabled(), current.sdLocalUrl(),
-                    current.realEsrganEnabled(), current.realEsrganModelPath(),
-                    current.comfyUiEnabled(), current.comfyUiUrl(), current.comfyUiCheckpoint(), current.comfyUiCheckpoints(),
-                    current.invokeAiEnabled(), current.invokeAiUrl(),
+                AppUsage u = usageRepository.load();
+                usageRepository.save(new AppUsage(
+                    u.fontSizeFactor(), u.lastSelectedFolder(), u.thumbnailView(), u.showArchivesInTree(),
                     new ArrayList<>(updatedPrompts), lastCheckedPromptTitles,
-                    current.debugProtocol()));
+                    u.comfyUiCheckpoint(), u.comfyUiCheckpoints(),
+                    u.windowWidth(), u.windowHeight(), u.windowX(), u.windowY(), u.lastScanDateEpochMilli(),
+                    u.sortField(), u.sortAscending()
+                ));
             },
             provider -> lastUsedProvider = provider,
             checkedTitles -> {
                 lastCheckedPromptTitles = new ArrayList<>(checkedTitles);
-                EnhancementConfig current = configRepository.getEnhancementConfig();
-                configRepository.setEnhancementConfig(new EnhancementConfig(
-                    current.stabilityAiEnabled(), current.stabilityAiKey(),
-                    current.openAiEnabled(), current.openAiKey(),
-                    current.geminiEnabled(), current.geminiKey(), current.geminiTemperature(),
-                    current.grokEnabled(), current.grokKey(), current.grokModel(),
-                    current.sdLocalEnabled(), current.sdLocalUrl(),
-                    current.realEsrganEnabled(), current.realEsrganModelPath(),
-                    current.comfyUiEnabled(), current.comfyUiUrl(), current.comfyUiCheckpoint(), current.comfyUiCheckpoints(),
-                    current.invokeAiEnabled(), current.invokeAiUrl(),
-                    current.savedPrompts(), lastCheckedPromptTitles,
-                    current.debugProtocol()));
+                AppUsage u = usageRepository.load();
+                usageRepository.save(new AppUsage(
+                    u.fontSizeFactor(), u.lastSelectedFolder(), u.thumbnailView(), u.showArchivesInTree(),
+                    u.savedPrompts(), lastCheckedPromptTitles,
+                    u.comfyUiCheckpoint(), u.comfyUiCheckpoints(),
+                    u.windowWidth(), u.windowHeight(), u.windowX(), u.windowY(), u.lastScanDateEpochMilli(),
+                    u.sortField(), u.sortAscending()
+                ));
             },
             additionalPrompt -> lastAdditionalPrompt = additionalPrompt,
             state -> {
-                EnhancementConfig current = configRepository.getEnhancementConfig();
-                configRepository.setEnhancementConfig(new EnhancementConfig(
-                    current.stabilityAiEnabled(), current.stabilityAiKey(),
-                    current.openAiEnabled(), current.openAiKey(),
-                    current.geminiEnabled(), current.geminiKey(), current.geminiTemperature(),
-                    current.grokEnabled(), current.grokKey(), current.grokModel(),
-                    current.sdLocalEnabled(), current.sdLocalUrl(),
-                    current.realEsrganEnabled(), current.realEsrganModelPath(),
-                    current.comfyUiEnabled(), current.comfyUiUrl(), state.selected(), state.checkpoints(),
-                    current.invokeAiEnabled(), current.invokeAiUrl(),
-                    current.savedPrompts(), current.checkedPromptTitles(),
-                    current.debugProtocol()
+                AppUsage u = usageRepository.load();
+                usageRepository.save(new AppUsage(
+                    u.fontSizeFactor(), u.lastSelectedFolder(), u.thumbnailView(), u.showArchivesInTree(),
+                    u.savedPrompts(), u.checkedPromptTitles(),
+                    state.selected(), state.checkpoints(),
+                    u.windowWidth(), u.windowHeight(), u.windowX(), u.windowY(), u.lastScanDateEpochMilli(),
+                    u.sortField(), u.sortAscending()
                 ));
                 imageEnhancementService.reloadProviders();
             },
             pp -> {
-                EnhancementConfig current = configRepository.getEnhancementConfig();
-                configRepository.setEnhancementConfig(new EnhancementConfig(
-                    current.stabilityAiEnabled(), current.stabilityAiKey(),
-                    current.openAiEnabled(), current.openAiKey(),
-                    current.geminiEnabled(), current.geminiKey(), pp.geminiTemperature(),
-                    current.grokEnabled(), current.grokKey(), pp.grokModel(),
-                    current.sdLocalEnabled(), current.sdLocalUrl(),
-                    current.realEsrganEnabled(), current.realEsrganModelPath(),
-                    current.comfyUiEnabled(), current.comfyUiUrl(), current.comfyUiCheckpoint(), current.comfyUiCheckpoints(),
-                    current.invokeAiEnabled(), current.invokeAiUrl(),
-                    current.savedPrompts(), current.checkedPromptTitles(),
-                    current.debugProtocol()
+                AppSettings s = settingsRepository.load();
+                settingsRepository.save(new AppSettings(
+                    s.organizeMode(), s.createYearFolder(), s.createMonthFolder(), s.createDayFolder(),
+                    s.splitLowRes(), s.splitMedRes(), s.lowResThresholdPixels(), s.hiResThresholdPixels(),
+                    s.targetFolder(), s.aiGeneratedFolder(), s.recycleBinFolder(), s.albumFolders(),
+                    s.stabilityAiEnabled(), s.stabilityAiKey(),
+                    s.openAiEnabled(), s.openAiKey(),
+                    s.geminiEnabled(), s.geminiKey(), pp.geminiTemperature(),
+                    s.grokEnabled(), s.grokKey(), pp.grokModel(),
+                    s.sdLocalEnabled(), s.sdLocalUrl(),
+                    s.realEsrganEnabled(), s.realEsrganModelPath(),
+                    s.comfyUiEnabled(), s.comfyUiUrl(),
+                    s.invokeAiEnabled(), s.invokeAiUrl(),
+                    s.debugProtocol()
                 ));
             },
             aiDir);
         dialog.initOwner(rootPane.getScene().getWindow());
+        // Pre-set the output filename to Clipboard-{provider}-{epoch}.jpg
+        EnhancementProvider initialProvider = imageEnhancementService.getConfiguredProviders().isEmpty()
+            ? null : (lastUsedProvider != null ? lastUsedProvider : imageEnhancementService.getConfiguredProviders().get(0));
+        if (initialProvider != null) {
+            dialog.setInitialOutputFilename("Clipboard-" + initialProvider.getShortId() + "-" + epoch + ".jpg");
+        }
         dialog.showAndWait().ifPresent(result -> {
-            // Clean up the temp input file
-            try { java.nio.file.Files.deleteIfExists(tempInputFinal); } catch (java.io.IOException ignored) {}
-
             if (result.success()) {
                 Path enhancedFile = result.outputPath();
-                // Extract provider slug from the output filename (pattern: base_AI-{slug}-{epoch}.jpg)
-                String outName = enhancedFile.getFileName().toString();
-                String providerSlug = "AI";
-                java.util.regex.Matcher m = java.util.regex.Pattern
-                    .compile("_AI-([^-]+(?:-[^-]+)*)-\\d+\\.jpg$")
-                    .matcher(outName);
-                if (m.find()) providerSlug = m.group(1);
-
-                String finalName = "Clipboard-" + providerSlug + "-" + epochFinal + ".jpg";
-                // Rename in-place within aiDir (file is already there from the dialog)
-                Path dest = enhancedFile.getParent().resolve(finalName);
-                try {
-                    java.nio.file.Files.move(enhancedFile, dest, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                    statusLabel.setText("Clipboard enhanced: " + finalName);
-                    logger.info("Clipboard enhancement saved as {}", dest);
-                    quickScanFolder(dest.getParent());
-                } catch (java.io.IOException e) {
-                    logger.error("Failed to rename clipboard enhanced image", e);
-                    statusLabel.setText("Enhanced clipboard image saved: " + enhancedFile.getFileName());
-                    quickScanFolder(enhancedFile.getParent());
-                }
+                statusLabel.setText("Clipboard enhanced: " + enhancedFile.getFileName());
+                logger.info("Clipboard enhancement saved as {}", enhancedFile);
+                quickScanFolder(enhancedFile.getParent());
             } else {
-                try { java.nio.file.Files.deleteIfExists(tempInputFinal); } catch (java.io.IOException ignored) {}
                 ErrorDialog.show("Enhancement Failed", "Enhancement failed", result.errorMessage());
             }
         });
+
         EnhancementDialog.DebugData dbgData2 = dialog.getDebugData();
         if (dbgData2 != null) {
             DebugProtocolDialog dbg = new DebugProtocolDialog(
@@ -1418,6 +1476,9 @@ public class MainController {
             dbg.initOwner(rootPane.getScene().getWindow());
             dbg.showAndWait();
         }
+
+        // Clean up temp input after debug dialog (so it's visible there if needed)
+        try { java.nio.file.Files.deleteIfExists(tempInputFinal); } catch (java.io.IOException ignored) {}
     }
 
     @FXML
@@ -1445,7 +1506,7 @@ public class MainController {
         if (selectedDirectory != null) {
             Path newPath = selectedDirectory.toPath();
             settings.setAiGeneratedFolder(newPath);
-            configRepository.setOrganizeSettings(settings);
+            saveSettings();
             buildDirectoryTree();
             statusLabel.setText("AI-Generated folder set: " + newPath.getFileName());
             logger.info("Set AI-Generated folder: {}", newPath);
@@ -1463,7 +1524,7 @@ public class MainController {
         if (selectedDirectory != null) {
             Path newPath = selectedDirectory.toPath();
             settings.setRecycleBinFolder(newPath);
-            configRepository.setOrganizeSettings(settings);
+            saveSettings();
             buildDirectoryTree();
             statusLabel.setText("Recycle-bin folder set: " + newPath.getFileName());
             logger.info("Set recycle-bin folder: {}", newPath);
@@ -1502,14 +1563,13 @@ public class MainController {
 
         // Add to base folders
         baseFolders.add(newPath);
-        configRepository.setBaseFolders(baseFolders);
 
         // Set as target folder if requested
         if (setAsTarget) {
             settings.setTargetFolder(newPath);
-            configRepository.setOrganizeSettings(settings);
             logger.info("Set new folder as target folder: {}", newPath);
         }
+        saveSettings();
 
         // Rebuild tree to show new album folder
         buildDirectoryTree();
@@ -1822,7 +1882,7 @@ public class MainController {
             }
 
             // Save last scan date
-            configRepository.setLastScanDate(Instant.now());
+            saveLastScanDate();
         });
     }
 
@@ -2349,7 +2409,7 @@ public class MainController {
                 }
             }
             if (!baseFolders.isEmpty()) {
-                configRepository.setBaseFolders(baseFolders);
+                saveSettings();
                 buildDirectoryTree();
                 Platform.runLater(() -> startScan(new ArrayList<>(baseFolders), true));
             }
@@ -2372,7 +2432,7 @@ public class MainController {
             changed = true;
         }
         if (changed) {
-            configRepository.setOrganizeSettings(settings);
+            saveSettings();
         }
         for (Path p : new Path[]{settings.getTargetFolder(), settings.getAiGeneratedFolder(), settings.getRecycleBinFolder()}) {
             try {
@@ -2384,7 +2444,7 @@ public class MainController {
     }
 
     private void loadBaseFolders() {
-        baseFolders = configRepository.getBaseFolders();
+        baseFolders = settingsRepository.load().toAlbumFolderPaths();
         if (!baseFolders.isEmpty()) {
             statusLabel.setText("Loaded " + baseFolders.size() + " saved folder(s)");
             logger.debug("Loaded {} base folders", baseFolders.size());
@@ -2651,7 +2711,7 @@ public class MainController {
             mediaTable.scrollTo(selected);
         }
         settings.setThumbnailView(false);
-        configRepository.setOrganizeSettings(settings);
+        saveUsage();
         statusLabel.setText("Switched to List View");
         logger.debug("Switched to List View");
     }
@@ -2664,7 +2724,7 @@ public class MainController {
         thumbnailScrollPane.setVisible(true);
         loadThumbnails(selected);
         settings.setThumbnailView(true);
-        configRepository.setOrganizeSettings(settings);
+        saveUsage();
         statusLabel.setText("Switched to Thumbnail View");
         logger.debug("Switched to Thumbnail View");
     }
@@ -2673,7 +2733,7 @@ public class MainController {
     private void onToggleShowArchives() {
         boolean show = showArchivesMenuItem.isSelected();
         settings.setShowArchivesInTree(show);
-        configRepository.setOrganizeSettings(settings);
+        saveUsage();
         buildDirectoryTree();
     }
 
@@ -2689,7 +2749,7 @@ public class MainController {
     private void onIncreaseFontSize() {
         settings.setFontSizeFactor(settings.getFontSizeFactor() + 1);
         applyFontSize();
-        configRepository.setOrganizeSettings(settings);
+        saveUsage();
         statusLabel.setText("Increased font size");
         logger.debug("Increased font size factor to: {}", settings.getFontSizeFactor());
     }
@@ -2698,7 +2758,7 @@ public class MainController {
     private void onDecreaseFontSize() {
         settings.setFontSizeFactor(settings.getFontSizeFactor() - 1);
         applyFontSize();
-        configRepository.setOrganizeSettings(settings);
+        saveUsage();
         statusLabel.setText("Decreased font size");
         logger.debug("Decreased font size factor to: {}", settings.getFontSizeFactor());
     }
@@ -2707,7 +2767,7 @@ public class MainController {
     private void onResetFontSize() {
         settings.setFontSizeFactor(0);
         applyFontSize();
-        configRepository.setOrganizeSettings(settings);
+        saveUsage();
         statusLabel.setText("Reset font size to 100%");
         logger.debug("Reset font size factor to 0");
     }
@@ -2784,9 +2844,21 @@ public class MainController {
         column.setSortType(direction);
         mediaTable.getSortOrder().add(column);
         mediaTable.sort();
+        currentSortAscending = (direction == TableColumn.SortType.ASCENDING);
+        currentSortField = columnToSortField(column);
+        saveUsage();
         if (thumbnailViewActive) {
             loadThumbnails();
         }
+    }
+
+    private String columnToSortField(TableColumn<MediaFile, ?> column) {
+        if (column == dateTakenColumn)  return "dateTaken";
+        if (column == dateColumn)       return "date";
+        if (column == typeColumn)       return "type";
+        if (column == durationColumn)   return "duration";
+        if (column == resolutionColumn) return "resolution";
+        return "name";
     }
 
     private MediaFile getSelectedFile() {
@@ -2953,6 +3025,9 @@ public class MainController {
         MenuItem deleteFileThumbItem = new MenuItem("Delete File");
         deleteFileThumbItem.setOnAction(e -> deleteFile(mediaFile));
 
+        MenuItem permanentDeleteThumbItem = new MenuItem("Permanently Delete");
+        permanentDeleteThumbItem.setOnAction(e -> permanentlyDeleteFile(mediaFile));
+
         MenuItem restoreFromBinThumbItem = new MenuItem("Restore to Original Location");
         restoreFromBinThumbItem.setOnAction(e -> restoreFromBin(mediaFile));
 
@@ -2972,6 +3047,8 @@ public class MainController {
             boolean hasBin = settings != null && settings.getRecycleBinFolder() != null;
             boolean isInBin = hasBin && mediaFile.getAbsolutePath().startsWith(settings.getRecycleBinFolder());
             deleteFileThumbItem.setDisable(!hasBin || isInBin);
+            permanentDeleteThumbItem.setVisible(isInBin);
+            permanentDeleteThumbItem.setDisable(false);
             restoreFromBinThumbItem.setVisible(isInBin);
             restoreFromBinThumbItem.setDisable(!recycleBinRepository.isInBin(mediaFile.getAbsolutePath()));
         });
@@ -2986,6 +3063,7 @@ public class MainController {
             new SeparatorMenuItem(),
             removeOtherDuplicatesItem,
             deleteFileThumbItem,
+            permanentDeleteThumbItem,
             restoreFromBinThumbItem,
             new SeparatorMenuItem(),
             enhanceWithAiItem
@@ -3593,6 +3671,43 @@ public class MainController {
             statusLabel.setText("Moved to recycle bin: " + filePath.getFileName());
         } else {
             showError("Move Failed", "Could not move file to recycle bin: " + filePath.getFileName());
+        }
+    }
+
+    private void permanentlyDeleteFile(MediaFile mediaFile) {
+        if (mediaFile == null) return;
+        Path filePath = mediaFile.getAbsolutePath();
+
+        Alert confirm = new Alert(Alert.AlertType.WARNING);
+        confirm.setTitle("Permanently Delete");
+        confirm.setHeaderText("Permanently delete this file?");
+        confirm.setContentText("This cannot be undone.\n\n" + filePath);
+        ButtonType deleteBtn = new ButtonType("Permanently Delete", ButtonBar.ButtonData.OK_DONE);
+        ButtonType cancelBtn = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
+        confirm.getButtonTypes().setAll(cancelBtn, deleteBtn);
+        ((Button) confirm.getDialogPane().lookupButton(cancelBtn)).setDefaultButton(true);
+        ((Button) confirm.getDialogPane().lookupButton(deleteBtn)).setStyle("-fx-base: #cc0000;");
+
+        Optional<ButtonType> result = confirm.showAndWait();
+        if (result.isEmpty() || result.get() != deleteBtn) return;
+
+        try {
+            Files.delete(filePath);
+            recycleBinRepository.remove(filePath);
+            removeFileFromIndex(filePath);
+            currentDisplayedFiles.removeIf(f -> {
+                Path abs = f.getAbsolutePath().normalize().toAbsolutePath();
+                Path target = filePath.normalize().toAbsolutePath();
+                return abs.toString().equalsIgnoreCase(target.toString());
+            });
+            refreshCurrentView();
+            updateFileCount(currentDisplayedFiles.size());
+            buildDirectoryTree();
+            statusLabel.setText("Permanently deleted: " + filePath.getFileName());
+            logger.info("Permanently deleted: {}", filePath);
+        } catch (IOException e) {
+            showError("Delete Failed", "Could not delete file: " + e.getMessage());
+            logger.error("Failed to permanently delete: {}", filePath, e);
         }
     }
 

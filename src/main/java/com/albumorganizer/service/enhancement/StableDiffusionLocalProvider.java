@@ -33,7 +33,7 @@ public class StableDiffusionLocalProvider implements EnhancementProvider {
     }
 
     @Override
-    public String getShortId() { return "sd"; }
+    public String getShortId() { return "SD"; }
 
     @Override
     public boolean isConfigured() {
@@ -91,7 +91,9 @@ public class StableDiffusionLocalProvider implements EnhancementProvider {
             JsonObject json = gson.fromJson(response.body(), JsonObject.class);
             String b64Result = json.getAsJsonArray("images").get(0).getAsString();
             byte[] resultBytes = Base64.getDecoder().decode(b64Result);
-            Path outputPath = ImageUtils.saveAsJpeg(resultBytes, request.inputPath(), getShortId(), request.outputDir());
+            Path outputPath = request.customOutputPath() != null
+                ? ImageUtils.saveAsJpeg(resultBytes, request.customOutputPath())
+                : ImageUtils.saveAsJpeg(resultBytes, request.inputPath(), getShortId(), request.outputDir());
             logger.info("Saved SD-enhanced image to {}", outputPath);
             return EnhancementResult.ok(outputPath, cleanBody, response.body());
         } catch (InterruptedException e) {

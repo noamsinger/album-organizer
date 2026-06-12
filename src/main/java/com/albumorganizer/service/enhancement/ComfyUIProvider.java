@@ -45,7 +45,7 @@ public class ComfyUIProvider implements EnhancementProvider {
     }
 
     @Override public String getName()       { return "ComfyUI (Local)"; }
-    @Override public String getShortId()    { return "comfyui"; }
+    @Override public String getShortId()    { return "ComfyUI"; }
     @Override public boolean isConfigured() { return baseUrl != null && !baseUrl.isBlank(); }
     @Override public boolean supportsPrompt()  { return true; }
     @Override public boolean supportsVideo()   { return true; }
@@ -116,7 +116,9 @@ public class ComfyUIProvider implements EnhancementProvider {
             "ComfyUI did not finish within 10 minutes.",
             "Prompt ID: " + promptId + " — check ComfyUI queue for errors.");
 
-        Path outputPath = ImageUtils.saveAsJpeg(result, request.inputPath(), getShortId(), request.outputDir());
+        Path outputPath = request.customOutputPath() != null
+            ? ImageUtils.saveAsJpeg(result, request.customOutputPath())
+            : ImageUtils.saveAsJpeg(result, request.inputPath(), getShortId(), request.outputDir());
         logger.info("Saved ComfyUI enhanced image to {}", outputPath);
         return EnhancementResult.ok(outputPath);
     }

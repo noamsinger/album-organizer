@@ -1,6 +1,7 @@
 package com.albumorganizer.controller;
 
 import com.albumorganizer.model.MediaFile;
+import com.albumorganizer.repository.UsageRepository;
 import com.albumorganizer.service.enhancement.*;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
@@ -40,6 +41,8 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
 
     private final ComboBox<EnhancementProvider> providerCombo;
     private final ComboBox<String> resolutionCombo;
+    private TextField outputFilenameField;
+    private boolean filenameUserOverridden = false;
 
     // Prompt list with checkboxes
     private final ObservableList<NamedPrompt> promptItems = FXCollections.observableArrayList();
@@ -54,6 +57,8 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
     private final Label providerInfoLabel;
     private final ProgressBar progressBar;
     private final Button enhanceButton;
+    private Button editBtn;
+    private Button deleteBtn;
 
     private final Consumer<List<NamedPrompt>> onPromptsChanged;
     private final Consumer<EnhancementProvider> onProviderUsed;
@@ -114,7 +119,19 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
 
         setTitle("Enhance with AI");
         setHeaderText("Enhance: " + mediaFile.getFilename());
-        getDialogPane().setStyle(String.format("-fx-font-size: %.2fem;", fontScale));
+        getDialogPane().setStyle(String.format(
+            "-fx-font-size: %.2fem; -fx-border-color: #C94A00; -fx-border-width: 3; -fx-border-radius: 4;",
+            fontScale));
+        getDialogPane().setPrefWidth(640);
+        setResizable(true);
+
+        // Strong orange header
+        javafx.application.Platform.runLater(() -> {
+            javafx.scene.Node header = getDialogPane().lookup(".header-panel");
+            if (header != null) header.setStyle("-fx-background-color: #C94A00;");
+            javafx.scene.Node headerLabel = getDialogPane().lookup(".header-panel .label");
+            if (headerLabel != null) headerLabel.setStyle("-fx-text-fill: white; -fx-font-weight: bold;");
+        });
 
         // No explicit buttons — window [X] and Esc close the dialog
         getDialogPane().getButtonTypes().add(ButtonType.CANCEL);
@@ -127,8 +144,17 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
 
         GridPane grid = new GridPane();
         grid.setHgap(10);
-        grid.setVgap(10);
-        grid.setPadding(new Insets(20, 20, 10, 10));
+        grid.setVgap(8);
+        grid.setPadding(new Insets(16, 16, 10, 16));
+
+        // Label column fixed; value column grows
+        ColumnConstraints col0 = new ColumnConstraints();
+        col0.setMinWidth(90);
+        col0.setHgrow(Priority.NEVER);
+        ColumnConstraints col1 = new ColumnConstraints();
+        col1.setHgrow(Priority.ALWAYS);
+        col1.setFillWidth(true);
+        grid.getColumnConstraints().addAll(col0, col1);
 
         int row = 0;
 
@@ -148,7 +174,11 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
                 .ifPresent(p -> providerCombo.getSelectionModel().select(p));
         }
         providerCombo.setPrefWidth(300);
+        providerCombo.setMaxWidth(Double.MAX_VALUE);
         grid.add(providerCombo, 1, row); row++;
+
+        // ── Separator after provider group ────────────────────────────────────
+        grid.add(new Separator(), 0, row, 2, 1); row++;
 
         // ComfyUI checkpoint row — only visible when ComfyUI provider is selected
         Label ckptLabel = new Label("Checkpoint:");
@@ -269,6 +299,7 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
         resolutionCombo.getItems().addAll("Original", "2×", "4×", "Custom...");
         resolutionCombo.getSelectionModel().selectFirst();
         resolutionCombo.setPrefWidth(300);
+        resolutionCombo.setMaxWidth(Double.MAX_VALUE);
         grid.add(resolutionCombo, 1, row); row++;
 
         HBox customResBox = new HBox(6);
@@ -288,6 +319,9 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
             customResBox.setManaged(custom);
         });
 
+        // ── Separator before prompts ──────────────────────────────────────────
+        grid.add(new Separator(), 0, row, 2, 1); row++;
+
         // ── Prompt section ────────────────────────────────────────────────────
         grid.add(new Label("Prompts:"), 0, row);
 
@@ -295,14 +329,15 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
         promptScrollPane = new ScrollPane(promptCheckList);
         promptScrollPane.setPrefHeight(140);
         promptScrollPane.setPrefWidth(300);
+        promptScrollPane.setMaxWidth(Double.MAX_VALUE);
         promptScrollPane.setFitToWidth(true);
 
         rebuildCheckBoxes(initialCheckedTitles);
 
         // Toolbar: Add / Edit / Delete / Up / Down
         Button addBtn = new Button("+");
-        Button editBtn = new Button("Edit");
-        Button deleteBtn = new Button("✕");
+        editBtn = new Button("Edit");
+        deleteBtn = new Button("✕");
         Button upBtn = new Button("↑");
         Button downBtn = new Button("↓");
         addBtn.setTooltip(new Tooltip("Add new prompt"));
@@ -320,7 +355,7 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
         // Edit/Delete act on the first checked prompt, or the most-recently focused one
         editBtn.setOnAction(e -> {
             NamedPrompt target = getFirstCheckedPrompt();
-            if (target == null) return;
+            if (target == null || target.isDefault()) return;
             showPromptEditDialog(target).ifPresent(np -> {
                 int idx = promptItems.indexOf(target);
                 promptItems.set(idx, np);
@@ -337,7 +372,7 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
 
         deleteBtn.setOnAction(e -> {
             NamedPrompt target = getFirstCheckedPrompt();
-            if (target == null) return;
+            if (target == null || target.isDefault()) return;
             promptItems.remove(target);
             List<String> checked = getCheckedTitles();
             checked.remove(target.title());
@@ -359,6 +394,7 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
         TextField additionalPromptField = new TextField(initialAdditionalPrompt != null ? initialAdditionalPrompt : "");
         additionalPromptField.setPromptText("One-off extra instruction (not saved)");
         additionalPromptField.setPrefWidth(260);
+        additionalPromptField.setMaxWidth(Double.MAX_VALUE);
         Button clearAdditionalBtn = new Button("✕");
         clearAdditionalBtn.setTooltip(new Tooltip("Clear additional prompt"));
         clearAdditionalBtn.setOnAction(e -> additionalPromptField.clear());
@@ -368,6 +404,9 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
         additionalPromptField.textProperty().addListener((obs, o, n) -> {
             if (onAdditionalPromptChanged != null) onAdditionalPromptChanged.accept(n);
         });
+
+        // ── Separator before status/info ──────────────────────────────────────
+        grid.add(new Separator(), 0, row, 2, 1); row++;
 
         // Provider warning label
         Label providerWarningLabel = new Label();
@@ -436,6 +475,10 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
 
             refreshProviderInfo(sel);
 
+            if (outputFilenameField != null && sel != null && !filenameUserOverridden) {
+                outputFilenameField.setText(previewOutputFilename(sel, mediaFile.getAbsolutePath()));
+            }
+
             if (sel != null && onProviderUsed != null) onProviderUsed.accept(sel);
         });
         providerCombo.fireEvent(new javafx.event.ActionEvent());
@@ -444,9 +487,37 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
         statusLabel = new Label("");
         progressBar = new ProgressBar(0);
         progressBar.setPrefWidth(300);
+        progressBar.setMaxWidth(Double.MAX_VALUE);
         progressBar.setVisible(false);
         grid.add(statusLabel, 0, row, 2, 1); row++;
         grid.add(progressBar, 0, row, 2, 1); row++;
+
+        // ── Separator before output filename + enhance button ─────────────────
+        grid.add(new Separator(), 0, row, 2, 1); row++;
+
+        // Output filename field
+        outputFilenameField = new TextField();
+        outputFilenameField.setMaxWidth(Double.MAX_VALUE);
+        outputFilenameField.setPromptText("Output filename");
+        // Initialise now that the field exists and a provider is already selected
+        EnhancementProvider currentProvider = providerCombo.getValue();
+        if (currentProvider != null) {
+            outputFilenameField.setText(previewOutputFilename(currentProvider, mediaFile.getAbsolutePath()));
+        }
+        Button refreshFilenameBtn = new Button("↺");
+        refreshFilenameBtn.setTooltip(new Tooltip("Generate a new filename"));
+        refreshFilenameBtn.setOnAction(e -> {
+            EnhancementProvider sel = providerCombo.getValue();
+            if (sel != null) {
+                filenameUserOverridden = false;
+                outputFilenameField.setText(previewOutputFilename(sel, mediaFile.getAbsolutePath()));
+            }
+        });
+        HBox filenameBox = new HBox(6, outputFilenameField, refreshFilenameBtn);
+        filenameBox.setAlignment(Pos.CENTER_LEFT);
+        HBox.setHgrow(outputFilenameField, Priority.ALWAYS);
+        grid.add(new Label("Output file:"), 0, row);
+        grid.add(filenameBox, 1, row); row++;
 
         // Enhance button
         enhanceButton = new Button("Enhance");
@@ -464,9 +535,16 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
         enhanceRow.setAlignment(Pos.CENTER_LEFT);
         grid.add(enhanceRow, 1, row);
 
-        enhanceButton.setOnAction(e -> runEnhancement(mediaFile, widthField, heightField,
-            additionalPromptField.getText(), copyToClipboardCheckBox.isSelected(),
-            geminiTempSlider, grokModelCombo));
+        enhanceButton.setOnAction(e -> {
+            // Refresh filename to ensure epoch matches actual enhancement time (skip if user/caller overrode it)
+            EnhancementProvider sel = providerCombo.getValue();
+            if (sel != null && !filenameUserOverridden) {
+                outputFilenameField.setText(previewOutputFilename(sel, mediaFile.getAbsolutePath()));
+            }
+            runEnhancement(mediaFile, widthField, heightField,
+                additionalPromptField.getText(), copyToClipboardCheckBox.isSelected(),
+                geminiTempSlider, grokModelCombo, outputFilenameField.getText().trim());
+        });
 
         getDialogPane().setContent(grid);
         setResultConverter(btn -> null);
@@ -479,7 +557,7 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
         NamedPrompt previouslyClicked = lastClickedPrompt;
         lastClickedPrompt = null;
         for (NamedPrompt np : promptItems) {
-            boolean isDefault = com.albumorganizer.service.enhancement.ImageEnhancementService.isDefaultPrompt(np.title());
+            boolean isDefault = np.isDefault();
             CheckBox cb = new CheckBox(np.title());
             if (isDefault) {
                 cb.setStyle("-fx-font-weight: bold;");
@@ -541,6 +619,14 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
     private void selectPrompt(NamedPrompt np) {
         lastClickedPrompt = np;
         updateRowHighlights();
+        updateEditDeleteButtons();
+    }
+
+    private void updateEditDeleteButtons() {
+        if (editBtn == null || deleteBtn == null) return;
+        boolean isDefault = lastClickedPrompt != null && lastClickedPrompt.isDefault();
+        editBtn.setDisable(isDefault);
+        deleteBtn.setDisable(isDefault);
     }
 
     private void updateRowHighlights() {
@@ -552,7 +638,9 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
                 : "-fx-background-color: transparent;");
             CheckBox cb = promptCheckBoxes.get(entry.getKey());
             if (cb != null) {
-                boolean isDefault = com.albumorganizer.service.enhancement.ImageEnhancementService.isDefaultPrompt(entry.getKey());
+                boolean isDefault = promptItems.stream()
+                .filter(p -> p.title().equals(entry.getKey()))
+                .findFirst().map(NamedPrompt::isDefault).orElse(false);
                 String boldPart = isDefault ? "-fx-font-weight: bold;" : "";
                 cb.setStyle(selected ? boldPart + " -fx-text-fill: white;" : boldPart);
             }
@@ -636,7 +724,8 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
 
         dlg.getDialogPane().setContent(g);
         dlg.setResultConverter(btn -> btn == saveType
-            ? new NamedPrompt(titleField.getText().trim(), promptArea.getText().trim())
+            ? new NamedPrompt(existing != null ? existing.id() : UsageRepository.randomPositiveId(),
+                              titleField.getText().trim(), promptArea.getText().trim())
             : null);
 
         return dlg.showAndWait();
@@ -675,9 +764,23 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
         providerInfoLabel.setText(cost != null ? "Est. cost: " + cost : "Est. cost: Free / Local");
     }
 
+    /** Override the output filename shown in the dialog (used by clipboard flow). */
+    public void setInitialOutputFilename(String filename) {
+        if (outputFilenameField != null && filename != null) {
+            outputFilenameField.setText(filename);
+            filenameUserOverridden = true;
+        }
+    }
+
+    private String previewOutputFilename(EnhancementProvider provider, Path inputPath) {
+        return ImageEnhancementService.resolveOutputPath(inputPath, provider.getShortId())
+            .getFileName().toString();
+    }
+
     private void runEnhancement(MediaFile mediaFile, TextField widthField, TextField heightField,
                                 String additionalPrompt, boolean copyToClipboard,
-                                Slider geminiTempSlider, ComboBox<String> grokModelCombo) {
+                                Slider geminiTempSlider, ComboBox<String> grokModelCombo,
+                                String customFilename) {
         EnhancementProvider provider = providerCombo.getValue();
         if (provider == null) return;
 
@@ -712,8 +815,12 @@ public class EnhancementDialog extends Dialog<EnhancementResult> {
         params.put("temperature", String.format("%.2f", geminiTempSlider.getValue()));
         params.put("model", grokModelCombo.getValue() != null ? grokModelCombo.getValue() : "grok-imagine-image-quality");
 
+        Path customOutputPath = (customFilename != null && !customFilename.isBlank() && outputDir != null)
+            ? outputDir.resolve(customFilename)
+            : null;
+
         EnhancementRequest request = new EnhancementRequest(
-            mediaFile.getAbsolutePath(), prompt, targetSize, outputDir, params);
+            mediaFile.getAbsolutePath(), prompt, targetSize, outputDir, params, customOutputPath);
 
         enhanceButton.setDisable(true);
         progressBar.setVisible(true);

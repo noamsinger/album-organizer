@@ -26,7 +26,7 @@ public class GeminiProvider implements EnhancementProvider {
     }
 
     @Override public String getName()          { return "Google Gemini (Cloud)"; }
-    @Override public String getShortId()       { return "gemini"; }
+    @Override public String getShortId()       { return "Gemini"; }
     @Override public boolean isConfigured()    { return apiKey != null && !apiKey.isBlank(); }
     @Override public boolean supportsPrompt()  { return true; }
     @Override public String estimatedCostPerImage() { return "~$0.04 / image (gemini-2.5-flash-image)"; }
@@ -108,7 +108,9 @@ public class GeminiProvider implements EnhancementProvider {
             return EnhancementResult.failure("Gemini response contained no image data", technicalDetail, cleanBody, resp.body());
         }
 
-        Path outputPath = ImageUtils.saveAsJpeg(resultBytes, request.inputPath(), getShortId(), request.outputDir());
+        Path outputPath = request.customOutputPath() != null
+            ? ImageUtils.saveAsJpeg(resultBytes, request.customOutputPath())
+            : ImageUtils.saveAsJpeg(resultBytes, request.inputPath(), getShortId(), request.outputDir());
         logger.info("Gemini enhanced image saved to {}", outputPath);
         return EnhancementResult.ok(outputPath, cleanBody, resp.body());
     }

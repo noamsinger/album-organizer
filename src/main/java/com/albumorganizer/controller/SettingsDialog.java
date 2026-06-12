@@ -461,7 +461,7 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
             // Keep only user-added prompts (those not in the default set), remove all defaults.
             // seedPrompts() will re-insert fresh defaults at the front on next open.
             prompts = current.savedPrompts().stream()
-                .filter(p -> !com.albumorganizer.service.enhancement.ImageEnhancementService.isDefaultPrompt(p.title()))
+                .filter(p -> !p.isDefault())
                 .collect(java.util.stream.Collectors.toList());
             // Also drop checked-titles that belonged to defaults
             java.util.Set<String> keptTitles = prompts.stream()

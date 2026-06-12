@@ -32,7 +32,7 @@ public class InvokeAIProvider implements EnhancementProvider {
     }
 
     @Override public String getName() { return "InvokeAI (Local)"; }
-    @Override public String getShortId() { return "invokeai"; }
+    @Override public String getShortId() { return "InvokeAI"; }
     @Override public boolean isConfigured() { return baseUrl != null && !baseUrl.isBlank(); }
     @Override public boolean supportsPrompt() { return true; }
 
@@ -92,7 +92,9 @@ public class InvokeAIProvider implements EnhancementProvider {
                 return EnhancementResult.failure("InvokeAI download failed HTTP " + dlResp.statusCode());
             }
 
-            Path outputPath = ImageUtils.saveAsJpeg(dlResp.body(), request.inputPath(), getShortId(), request.outputDir());
+            Path outputPath = request.customOutputPath() != null
+                ? ImageUtils.saveAsJpeg(dlResp.body(), request.customOutputPath())
+                : ImageUtils.saveAsJpeg(dlResp.body(), request.inputPath(), getShortId(), request.outputDir());
             logger.info("Saved InvokeAI enhanced image to {}", outputPath);
             return EnhancementResult.ok(outputPath, cleanBody, enqueueRespBody);
         } catch (InterruptedException e) {

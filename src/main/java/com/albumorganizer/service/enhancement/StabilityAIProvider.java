@@ -33,7 +33,7 @@ public class StabilityAIProvider implements EnhancementProvider {
     }
 
     @Override
-    public String getShortId() { return "stabilityai"; }
+    public String getShortId() { return "StabilityAI"; }
 
     @Override
     public boolean isConfigured() {
@@ -142,7 +142,9 @@ public class StabilityAIProvider implements EnhancementProvider {
     }
 
     private Path writeOutput(EnhancementRequest request, byte[] bytes, String outputFormat) throws IOException {
-        Path outputPath = ImageUtils.saveAsJpeg(bytes, request.inputPath(), getShortId(), request.outputDir());
+        Path outputPath = request.customOutputPath() != null
+            ? ImageUtils.saveAsJpeg(bytes, request.customOutputPath())
+            : ImageUtils.saveAsJpeg(bytes, request.inputPath(), getShortId(), request.outputDir());
         logger.info("Saved enhanced image to {}", outputPath);
         return outputPath;
     }

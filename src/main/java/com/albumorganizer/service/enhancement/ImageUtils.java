@@ -148,6 +148,29 @@ class ImageUtils {
     }
 
     /**
+     * Writes raw image bytes as JPEG directly to the given output path.
+     * Used when the caller has already resolved the desired path (e.g. user-edited filename).
+     */
+    static Path saveAsJpeg(byte[] imageBytes, Path outputPath) throws IOException {
+        java.nio.file.Files.createDirectories(outputPath.getParent());
+        BufferedImage img = ImageIO.read(new java.io.ByteArrayInputStream(imageBytes));
+        if (img == null) {
+            java.nio.file.Files.write(outputPath, imageBytes);
+            return outputPath;
+        }
+        if (img.getType() != BufferedImage.TYPE_INT_RGB) {
+            BufferedImage rgb = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_RGB);
+            java.awt.Graphics2D g = rgb.createGraphics();
+            g.drawImage(img, 0, 0, null);
+            g.dispose();
+            img = rgb;
+        }
+        byte[] jpegBytes = encode(img, false, 0.92f);
+        java.nio.file.Files.write(outputPath, jpegBytes);
+        return outputPath;
+    }
+
+    /**
      * Converts raw image bytes to JPEG and writes to the resolved output path.
      * Output filename pattern: {base}_AI-{providerSlug}-{epoch}.jpg
      */
@@ -168,7 +191,7 @@ class ImageUtils {
             String base = dot >= 0 ? filename.substring(0, dot) : filename;
             String slug = providerName.replaceAll("[^a-zA-Z0-9_-]", "_");
             long epoch = System.currentTimeMillis() / 1000;
-            outputPath = outputDir.resolve(String.format("%s_AI-%s-%d.jpg", base, slug, epoch));
+            outputPath = outputDir.resolve(String.format("%s_%s-%d.jpg", base, slug, epoch));
         } else {
             outputPath = ImageEnhancementService.resolveOutputPath(inputPath, providerName);
         }

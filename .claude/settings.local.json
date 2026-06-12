@@ -39,7 +39,9 @@
       "Bash(java -XshowSettings:all -version)",
       "Bash(jar tf *)",
       "Bash(grep -v \"^$\")",
-      "Bash(pkill -f \"album-organizer\")"
+      "Bash(pkill -f \"album-organizer\")",
+      "Bash(cat)",
+      "Read(//tmp/**)"
     ]
   }
 }

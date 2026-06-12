@@ -34,7 +34,7 @@ public class RealEsrganProvider implements EnhancementProvider {
     }
 
     @Override
-    public String getShortId() { return "esrgan"; }
+    public String getShortId() { return "ESRGAN"; }
 
     @Override
     public boolean isConfigured() {
@@ -68,14 +68,17 @@ public class RealEsrganProvider implements EnhancementProvider {
         }
 
         Path outputPath;
-        if (request.outputDir() != null) {
+        if (request.customOutputPath() != null) {
+            java.nio.file.Files.createDirectories(request.customOutputPath().getParent());
+            outputPath = request.customOutputPath();
+        } else if (request.outputDir() != null) {
             java.nio.file.Files.createDirectories(request.outputDir());
             String filename = request.inputPath().getFileName().toString();
             int dot = filename.lastIndexOf('.');
             String base = dot >= 0 ? filename.substring(0, dot) : filename;
             String slug = getShortId().replaceAll("[^a-zA-Z0-9_-]", "_");
             long epoch = System.currentTimeMillis() / 1000;
-            outputPath = request.outputDir().resolve(String.format("%s_AI-%s-%d.jpg", base, slug, epoch));
+            outputPath = request.outputDir().resolve(String.format("%s_%s-%d.jpg", base, slug, epoch));
         } else {
             outputPath = ImageEnhancementService.resolveOutputPath(request.inputPath(), getShortId());
         }
