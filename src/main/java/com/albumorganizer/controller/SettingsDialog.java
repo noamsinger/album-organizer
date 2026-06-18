@@ -10,6 +10,8 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 
 import java.awt.Desktop;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -47,6 +49,23 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
     private final TextField realEsrganPathField;
     private final CheckBox comfyUiEnabledCheck;
     private final TextField comfyUiUrlField;
+
+    // Cloud video fields
+    private final CheckBox topazEnabledCheck;
+    private final PasswordField topazKeyField;
+    private final CheckBox runwayEnabledCheck;
+    private final PasswordField runwayKeyField;
+    private final CheckBox pikaEnabledCheck;
+    private final PasswordField pikaKeyField;
+    private final CheckBox klingEnabledCheck;
+    private final PasswordField klingKeyField;
+
+    // Local video fields
+    private final CheckBox ffmpegEsrganEnabledCheck;
+    private final TextField ffmpegPathField;
+    private final TextField esrganBinaryPathField;
+    private final CheckBox video2xEnabledCheck;
+    private final TextField video2xPathField;
 
     private boolean debugProtocolEnabled;
     private boolean resetPromptsRequested = false;
@@ -115,15 +134,12 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
         lowResPixelsField.setDisable(!splitResolutionCheck.isSelected());
         hiResPixelsField.setDisable(!splitResolutionCheck.isSelected());
 
-        // ── Single AI Enhancement grid ────────────────────────────────────────
-        GridPane aiGrid = new GridPane();
-        aiGrid.setHgap(10);
-        aiGrid.setVgap(8);
-        aiGrid.setPadding(new Insets(16, 20, 16, 16));
-        int ai = 0;
-
-        // ═══ GLOBAL OPTIONS ═══════════════════════════════════════════════════
-        aiGrid.add(sectionBanner("⚙  Global Options"), 0, ai, 2, 1); ai++;
+        // ── Global options (always visible at top of AI Enhancement tab) ────────
+        GridPane globalGrid = new GridPane();
+        globalGrid.setHgap(10);
+        globalGrid.setVgap(8);
+        globalGrid.setPadding(new Insets(12, 16, 8, 16));
+        int gi = 0;
 
         CheckBox debugProtocolCheck = new CheckBox("Enable Debug Protocol");
         debugProtocolCheck.setSelected(currentEnhancement.debugProtocol());
@@ -132,9 +148,8 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
             "and the full request/response data (images replaced with XXXXXXXX)."));
         debugProtocolEnabled = currentEnhancement.debugProtocol();
         debugProtocolCheck.selectedProperty().addListener((obs, o, n) -> debugProtocolEnabled = n);
-        aiGrid.add(debugProtocolCheck, 0, ai, 2, 1); ai++;
+        globalGrid.add(debugProtocolCheck, 0, gi, 2, 1); gi++;
 
-        // Reset default prompts button
         Button resetPromptsBtn = new Button("Reset Default Prompts…");
         resetPromptsBtn.setTooltip(new Tooltip(
             "Remove all user-saved prompts and restore only the built-in default prompts."));
@@ -154,138 +169,143 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
                 }
             });
         });
-        aiGrid.add(resetPromptsBtn, 0, ai, 2, 1); ai++;
+        globalGrid.add(resetPromptsBtn, 0, gi, 2, 1);
 
-        aiGrid.add(new Separator(), 0, ai, 2, 1); ai++;
-        aiGrid.add(sectionBanner("☁  Cloud (API-based)"), 0, ai, 2, 1); ai++;
-        aiGrid.add(categoryLabel("Image enhancement"), 0, ai, 2, 1); ai++;
+        // ── Image / Cloud sub-tab ─────────────────────────────────────────────
+        GridPane imageCloudGrid = new GridPane();
+        imageCloudGrid.setHgap(10);
+        imageCloudGrid.setVgap(8);
+        imageCloudGrid.setPadding(new Insets(12, 16, 12, 16));
+        int ic = 0;
 
         // Stability AI
-        aiGrid.add(toolHeading("Stability AI",
+        imageCloudGrid.add(toolHeading("Stability AI",
             "Professional image upscaling and creative enhancement via Stability AI's cloud API. " +
             "Requires a paid API key. Best for high-quality upscaling and creative transformations.",
             "How do I set up Stability AI API access to use their image upscaling and enhancement API? " +
             "Step-by-step: create account at platform.stability.ai, add billing, generate API key, " +
             "and verify with curl to POST https://api.stability.ai/v2beta/stable-image/upscale/creative"),
-            0, ai, 2, 1); ai++;
+            0, ic, 2, 1); ic++;
         stabilityEnabledCheck = new CheckBox("Enabled");
         stabilityEnabledCheck.setSelected(currentEnhancement.stabilityAiEnabled());
-        aiGrid.add(stabilityEnabledCheck, 0, ai, 2, 1); ai++;
-        aiGrid.add(new Label("API Key:"), 0, ai);
+        imageCloudGrid.add(stabilityEnabledCheck, 0, ic, 2, 1); ic++;
+        imageCloudGrid.add(new Label("API Key:"), 0, ic);
         stabilityKeyField = new PasswordField();
         stabilityKeyField.setText(currentEnhancement.stabilityAiKey());
         stabilityKeyField.setPrefWidth(320);
         stabilityKeyField.setPromptText("sk-...");
-        aiGrid.add(stabilityKeyField, 1, ai); ai++;
+        imageCloudGrid.add(stabilityKeyField, 1, ic); ic++;
         bindToCheck(stabilityEnabledCheck, stabilityKeyField);
-        aiGrid.add(new Separator(), 0, ai, 2, 1); ai++;
+        imageCloudGrid.add(new Separator(), 0, ic, 2, 1); ic++;
 
         // OpenAI DALL·E
-        aiGrid.add(toolHeading("OpenAI DALL·E",
+        imageCloudGrid.add(toolHeading("OpenAI DALL·E",
             "Image editing and generation using OpenAI's DALL·E model. " +
             "Supports prompt-driven inpainting and creative enhancement. Requires a paid OpenAI API key.",
             "How do I set up an OpenAI API key to use the DALL-E image editing API for image enhancement? " +
             "Step-by-step: create account at platform.openai.com, add payment, generate secret API key, " +
             "and verify with curl to POST https://api.openai.com/v1/images/edits"),
-            0, ai, 2, 1); ai++;
+            0, ic, 2, 1); ic++;
         openAiEnabledCheck = new CheckBox("Enabled");
         openAiEnabledCheck.setSelected(currentEnhancement.openAiEnabled());
-        aiGrid.add(openAiEnabledCheck, 0, ai, 2, 1); ai++;
-        aiGrid.add(new Label("API Key:"), 0, ai);
+        imageCloudGrid.add(openAiEnabledCheck, 0, ic, 2, 1); ic++;
+        imageCloudGrid.add(new Label("API Key:"), 0, ic);
         openAiKeyField = new PasswordField();
         openAiKeyField.setText(currentEnhancement.openAiKey());
         openAiKeyField.setPrefWidth(320);
         openAiKeyField.setPromptText("sk-...");
-        aiGrid.add(openAiKeyField, 1, ai); ai++;
+        imageCloudGrid.add(openAiKeyField, 1, ic); ic++;
         bindToCheck(openAiEnabledCheck, openAiKeyField);
-        aiGrid.add(new Separator(), 0, ai, 2, 1); ai++;
+        imageCloudGrid.add(new Separator(), 0, ic, 2, 1); ic++;
 
         // Google Gemini
-        aiGrid.add(toolHeading("Google Gemini",
+        imageCloudGrid.add(toolHeading("Google Gemini",
             "Prompt-driven image generation and enhancement using Google's Gemini multimodal model. " +
             "Free tier available. Good for creative reinterpretation and style transfer.",
             "How do I set up a Google Gemini API key to use the Gemini image generation API? " +
             "Step-by-step: go to aistudio.google.com, create API key, " +
             "and verify with curl to the gemini-2.0-flash-exp-image-generation model"),
-            0, ai, 2, 1); ai++;
+            0, ic, 2, 1); ic++;
         geminiEnabledCheck = new CheckBox("Enabled");
         geminiEnabledCheck.setSelected(currentEnhancement.geminiEnabled());
-        aiGrid.add(geminiEnabledCheck, 0, ai, 2, 1); ai++;
-        aiGrid.add(new Label("API Key:"), 0, ai);
+        imageCloudGrid.add(geminiEnabledCheck, 0, ic, 2, 1); ic++;
+        imageCloudGrid.add(new Label("API Key:"), 0, ic);
         geminiKeyField = new PasswordField();
         geminiKeyField.setText(currentEnhancement.geminiKey());
         geminiKeyField.setPrefWidth(320);
         geminiKeyField.setPromptText("AIza...");
-        aiGrid.add(geminiKeyField, 1, ai); ai++;
+        imageCloudGrid.add(geminiKeyField, 1, ic); ic++;
         bindToCheck(geminiEnabledCheck, geminiKeyField);
-        aiGrid.add(new Separator(), 0, ai, 2, 1); ai++;
+        imageCloudGrid.add(new Separator(), 0, ic, 2, 1); ic++;
 
         // Grok xAI
-        aiGrid.add(toolHeading("Grok xAI",
+        imageCloudGrid.add(toolHeading("Grok xAI",
             "Image generation using xAI's Grok model. " +
             "Prompt-driven enhancement via the Aurora image generation endpoint. Requires a paid xAI API key.",
             "How do I set up a Grok xAI API key to use their image generation API? " +
             "Step-by-step: go to console.x.ai, create API key, " +
             "and verify with curl to POST https://api.x.ai/v1/images/generations"),
-            0, ai, 2, 1); ai++;
+            0, ic, 2, 1); ic++;
         grokEnabledCheck = new CheckBox("Enabled");
         grokEnabledCheck.setSelected(currentEnhancement.grokEnabled());
-        aiGrid.add(grokEnabledCheck, 0, ai, 2, 1); ai++;
-        aiGrid.add(new Label("API Key:"), 0, ai);
+        imageCloudGrid.add(grokEnabledCheck, 0, ic, 2, 1); ic++;
+        imageCloudGrid.add(new Label("API Key:"), 0, ic);
         grokKeyField = new PasswordField();
         grokKeyField.setText(currentEnhancement.grokKey());
         grokKeyField.setPrefWidth(320);
         grokKeyField.setPromptText("xai-...");
-        aiGrid.add(grokKeyField, 1, ai); ai++;
+        imageCloudGrid.add(grokKeyField, 1, ic);
         bindToCheck(grokEnabledCheck, grokKeyField);
 
-        // ═══ LOCAL ═══════════════════════════════════════════════════════════
-        aiGrid.add(new Separator(), 0, ai, 2, 1); ai++;
-        aiGrid.add(sectionBanner("🖥  Local (self-hosted)"), 0, ai, 2, 1); ai++;
-        aiGrid.add(categoryLabel("Image enhancement"), 0, ai, 2, 1); ai++;
+        // ── Image / Local sub-tab ─────────────────────────────────────────────
+        GridPane imageLocalGrid = new GridPane();
+        imageLocalGrid.setHgap(10);
+        imageLocalGrid.setVgap(8);
+        imageLocalGrid.setPadding(new Insets(12, 16, 12, 16));
+        int il = 0;
 
         // Stable Diffusion WebUI
-        aiGrid.add(toolHeading("Stable Diffusion WebUI (AUTOMATIC1111)",
+        imageLocalGrid.add(toolHeading("Stable Diffusion WebUI (AUTOMATIC1111)",
             "Local img2img enhancement using AUTOMATIC1111's Stable Diffusion web UI. " +
             "Runs fully on your machine — no API costs. Requires a GPU for practical speed.",
             "How do I install AUTOMATIC1111 Stable Diffusion WebUI on a Mac for REST API use at http://localhost:7860? " +
             "Step-by-step shell commands: install Homebrew, Python, git, " +
             "clone github.com/AUTOMATIC1111/stable-diffusion-webui, run with --api flag, " +
             "download a checkpoint, and verify with curl to /sdapi/v1/sd-models"),
-            0, ai, 2, 1); ai++;
+            0, il, 2, 1); il++;
         sdLocalEnabledCheck = new CheckBox("Enabled");
         sdLocalEnabledCheck.setSelected(currentEnhancement.sdLocalEnabled());
-        aiGrid.add(sdLocalEnabledCheck, 0, ai, 2, 1); ai++;
-        aiGrid.add(new Label("Base URL:"), 0, ai);
+        imageLocalGrid.add(sdLocalEnabledCheck, 0, il, 2, 1); il++;
+        imageLocalGrid.add(new Label("Base URL:"), 0, il);
         sdLocalUrlField = new TextField(currentEnhancement.sdLocalUrl());
         sdLocalUrlField.setPrefWidth(300);
         sdLocalUrlField.setPromptText("http://localhost:7860");
-        aiGrid.add(sdLocalUrlField, 1, ai); ai++;
+        imageLocalGrid.add(sdLocalUrlField, 1, il); il++;
         bindToCheck(sdLocalEnabledCheck, sdLocalUrlField);
-        aiGrid.add(new Separator(), 0, ai, 2, 1); ai++;
+        imageLocalGrid.add(new Separator(), 0, il, 2, 1); il++;
 
         // InvokeAI
-        aiGrid.add(toolHeading("InvokeAI",
+        imageLocalGrid.add(toolHeading("InvokeAI",
             "Polished local Stable Diffusion server with a clean REST API. " +
             "Easier to set up than AUTOMATIC1111. Runs on your machine — no API costs. GPU recommended.",
             "How do I install InvokeAI on a Mac for REST API use at http://localhost:9090? " +
             "Step-by-step shell commands: install Python via Homebrew, " +
             "run the official installer or pip install invokeai, launch server, download a model, " +
             "and verify with curl to /api/v1/app/version"),
-            0, ai, 2, 1); ai++;
+            0, il, 2, 1); il++;
         invokeAiEnabledCheck = new CheckBox("Enabled");
         invokeAiEnabledCheck.setSelected(currentEnhancement.invokeAiEnabled());
-        aiGrid.add(invokeAiEnabledCheck, 0, ai, 2, 1); ai++;
-        aiGrid.add(new Label("Base URL:"), 0, ai);
+        imageLocalGrid.add(invokeAiEnabledCheck, 0, il, 2, 1); il++;
+        imageLocalGrid.add(new Label("Base URL:"), 0, il);
         invokeAiUrlField = new TextField(currentEnhancement.invokeAiUrl());
         invokeAiUrlField.setPrefWidth(300);
         invokeAiUrlField.setPromptText("http://localhost:9090");
-        aiGrid.add(invokeAiUrlField, 1, ai); ai++;
+        imageLocalGrid.add(invokeAiUrlField, 1, il); il++;
         bindToCheck(invokeAiEnabledCheck, invokeAiUrlField);
-        aiGrid.add(new Separator(), 0, ai, 2, 1); ai++;
+        imageLocalGrid.add(new Separator(), 0, il, 2, 1); il++;
 
         // Real-ESRGAN
-        aiGrid.add(toolHeading("Real-ESRGAN",
+        imageLocalGrid.add(toolHeading("Real-ESRGAN",
             "Fast, high-quality image upscaling using the Real-ESRGAN neural network model. " +
             "No prompts — pure upscaling. Runs on CPU via Java ONNX Runtime, no GPU required. " +
             "Download the ONNX model file once and point to it below.",
@@ -293,22 +313,20 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
             "Shell commands: mkdir ~/.config/album-organizer/models/, " +
             "download RealESRGAN_x4plus.onnx from github.com/xinntao/Real-ESRGAN releases via curl, " +
             "and verify the file size"),
-            0, ai, 2, 1); ai++;
+            0, il, 2, 1); il++;
         realEsrganEnabledCheck = new CheckBox("Enabled");
         realEsrganEnabledCheck.setSelected(currentEnhancement.realEsrganEnabled());
-        aiGrid.add(realEsrganEnabledCheck, 0, ai, 2, 1); ai++;
-        aiGrid.add(new Label("Model path:"), 0, ai);
+        imageLocalGrid.add(realEsrganEnabledCheck, 0, il, 2, 1); il++;
+        imageLocalGrid.add(new Label("Model path:"), 0, il);
         realEsrganPathField = new TextField(currentEnhancement.realEsrganModelPath());
         realEsrganPathField.setPrefWidth(300);
         realEsrganPathField.setPromptText("~/.config/album-organizer/models/RealESRGAN_x4plus.onnx");
-        aiGrid.add(realEsrganPathField, 1, ai); ai++;
+        imageLocalGrid.add(lookupField(realEsrganPathField, "realesrgan-ncnn-vulkan"), 1, il); il++;
         bindToCheck(realEsrganEnabledCheck, realEsrganPathField);
+        imageLocalGrid.add(new Separator(), 0, il, 2, 1); il++;
 
-        aiGrid.add(new Separator(), 0, ai, 2, 1); ai++;
-        aiGrid.add(categoryLabel("Image + Video enhancement"), 0, ai, 2, 1); ai++;
-
-        // ComfyUI
-        aiGrid.add(toolHeading("ComfyUI",
+        // ComfyUI (image + video — lives in local image tab with a note)
+        imageLocalGrid.add(toolHeading("ComfyUI  (Image + Video)",
             "Flexible node-based AI pipeline that supports both image and video enhancement. " +
             "Image: img2img via KSampler. Video: frame-by-frame enhancement via ComfyUI-VideoHelperSuite (VHS). " +
             "Runs fully on your machine. GPU strongly recommended for video.",
@@ -319,26 +337,166 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
             "download a checkpoint into models/checkpoints, " +
             "then clone github.com/Kosinkadink/ComfyUI-VideoHelperSuite into custom_nodes and restart. " +
             "Verify with curl to /history"),
-            0, ai, 2, 1); ai++;
+            0, il, 2, 1); il++;
         comfyUiEnabledCheck = new CheckBox("Enabled");
         comfyUiEnabledCheck.setSelected(currentEnhancement.comfyUiEnabled());
-        aiGrid.add(comfyUiEnabledCheck, 0, ai, 2, 1); ai++;
-        aiGrid.add(new Label("Base URL:"), 0, ai);
+        imageLocalGrid.add(comfyUiEnabledCheck, 0, il, 2, 1); il++;
+        imageLocalGrid.add(new Label("Base URL:"), 0, il);
         comfyUiUrlField = new TextField(currentEnhancement.comfyUiUrl());
         comfyUiUrlField.setPrefWidth(300);
         comfyUiUrlField.setPromptText("http://localhost:8188");
-        aiGrid.add(comfyUiUrlField, 1, ai);
+        imageLocalGrid.add(comfyUiUrlField, 1, il);
         bindToCheck(comfyUiEnabledCheck, comfyUiUrlField);
 
-        // ── Top-level tabs ────────────────────────────────────────────────────
-        ScrollPane aiScroll = new ScrollPane(aiGrid);
-        aiScroll.setFitToWidth(true);
+        // ── Video / Cloud sub-tab ─────────────────────────────────────────────
+        GridPane videoCloudGrid = new GridPane();
+        videoCloudGrid.setHgap(10);
+        videoCloudGrid.setVgap(8);
+        videoCloudGrid.setPadding(new Insets(12, 16, 12, 16));
+        int vc = 0;
 
+        // Topaz Video AI
+        videoCloudGrid.add(toolHeading("Topaz Video AI",
+            "Professional cloud video upscaling and enhancement via Topaz Labs API. " +
+            "Best-in-class quality for upscaling, denoising and frame interpolation. Requires a paid API key.",
+            "How do I get a Topaz Video AI API key for cloud video enhancement? " +
+            "Visit account.topazlabs.com, subscribe, generate API key."),
+            0, vc, 2, 1); vc++;
+        topazEnabledCheck = new CheckBox("Enabled");
+        topazEnabledCheck.setSelected(currentEnhancement.topazEnabled());
+        videoCloudGrid.add(topazEnabledCheck, 0, vc, 2, 1); vc++;
+        videoCloudGrid.add(new Label("API Key:"), 0, vc);
+        topazKeyField = new PasswordField();
+        topazKeyField.setText(currentEnhancement.topazKey());
+        topazKeyField.setPrefWidth(320);
+        topazKeyField.setPromptText("tvai-...");
+        videoCloudGrid.add(topazKeyField, 1, vc); vc++;
+        bindToCheck(topazEnabledCheck, topazKeyField);
+        videoCloudGrid.add(new Separator(), 0, vc, 2, 1); vc++;
+
+        // RunwayML
+        videoCloudGrid.add(toolHeading("RunwayML",
+            "AI video-to-video enhancement using RunwayML Gen-4 Turbo. " +
+            "Supports prompt-driven style and quality changes. Requires a paid RunwayML API key.",
+            "How do I get a RunwayML API key for video enhancement? " +
+            "Visit app.runwayml.com, create account, go to Account → API Keys."),
+            0, vc, 2, 1); vc++;
+        runwayEnabledCheck = new CheckBox("Enabled");
+        runwayEnabledCheck.setSelected(currentEnhancement.runwayEnabled());
+        videoCloudGrid.add(runwayEnabledCheck, 0, vc, 2, 1); vc++;
+        videoCloudGrid.add(new Label("API Key:"), 0, vc);
+        runwayKeyField = new PasswordField();
+        runwayKeyField.setText(currentEnhancement.runwayKey());
+        runwayKeyField.setPrefWidth(320);
+        runwayKeyField.setPromptText("rml-...");
+        videoCloudGrid.add(runwayKeyField, 1, vc); vc++;
+        bindToCheck(runwayEnabledCheck, runwayKeyField);
+        videoCloudGrid.add(new Separator(), 0, vc, 2, 1); vc++;
+
+        // Pika Labs
+        videoCloudGrid.add(toolHeading("Pika Labs",
+            "Cloud video-to-video enhancement with prompt control. Credits-based pricing. " +
+            "Requires a Pika API key.",
+            "How do I get a Pika Labs API key for video enhancement? " +
+            "Visit pika.art, create account, go to Settings → API."),
+            0, vc, 2, 1); vc++;
+        pikaEnabledCheck = new CheckBox("Enabled");
+        pikaEnabledCheck.setSelected(currentEnhancement.pikaEnabled());
+        videoCloudGrid.add(pikaEnabledCheck, 0, vc, 2, 1); vc++;
+        videoCloudGrid.add(new Label("API Key:"), 0, vc);
+        pikaKeyField = new PasswordField();
+        pikaKeyField.setText(currentEnhancement.pikaKey());
+        pikaKeyField.setPrefWidth(320);
+        pikaKeyField.setPromptText("pika-...");
+        videoCloudGrid.add(pikaKeyField, 1, vc); vc++;
+        bindToCheck(pikaEnabledCheck, pikaKeyField);
+        videoCloudGrid.add(new Separator(), 0, vc, 2, 1); vc++;
+
+        // Kling AI
+        videoCloudGrid.add(toolHeading("Kling AI",
+            "Cloud video-to-video enhancement and generation using Kling AI. Credits-based pricing. " +
+            "Requires a Kling API key.",
+            "How do I get a Kling AI API key for video enhancement? " +
+            "Visit klingai.com, create account, go to Settings → API Keys."),
+            0, vc, 2, 1); vc++;
+        klingEnabledCheck = new CheckBox("Enabled");
+        klingEnabledCheck.setSelected(currentEnhancement.klingEnabled());
+        videoCloudGrid.add(klingEnabledCheck, 0, vc, 2, 1); vc++;
+        videoCloudGrid.add(new Label("API Key:"), 0, vc);
+        klingKeyField = new PasswordField();
+        klingKeyField.setText(currentEnhancement.klingKey());
+        klingKeyField.setPrefWidth(320);
+        klingKeyField.setPromptText("kling-...");
+        videoCloudGrid.add(klingKeyField, 1, vc);
+        bindToCheck(klingEnabledCheck, klingKeyField);
+
+        // ── Video / Local sub-tab ─────────────────────────────────────────────
+        GridPane videoLocalGrid = new GridPane();
+        videoLocalGrid.setHgap(10);
+        videoLocalGrid.setVgap(8);
+        videoLocalGrid.setPadding(new Insets(12, 16, 12, 16));
+        int vl = 0;
+
+        // FFmpeg + Real-ESRGAN
+        videoLocalGrid.add(toolHeading("FFmpeg + Real-ESRGAN NCNN",
+            "Free local video upscaling: FFmpeg extracts frames, realesrgan-ncnn-vulkan upscales each frame, " +
+            "FFmpeg reassembles. GPU-accelerated via Vulkan. No API costs.",
+            "How do I install ffmpeg and realesrgan-ncnn-vulkan on a Mac for video upscaling? " +
+            "brew install ffmpeg, then download realesrgan-ncnn-vulkan from github.com/xinntao/Real-ESRGAN/releases"),
+            0, vl, 2, 1); vl++;
+        ffmpegEsrganEnabledCheck = new CheckBox("Enabled");
+        ffmpegEsrganEnabledCheck.setSelected(currentEnhancement.ffmpegEsrganEnabled());
+        videoLocalGrid.add(ffmpegEsrganEnabledCheck, 0, vl, 2, 1); vl++;
+        videoLocalGrid.add(new Label("FFmpeg path:"), 0, vl);
+        ffmpegPathField = new TextField(currentEnhancement.ffmpegPath());
+        ffmpegPathField.setPrefWidth(300);
+        ffmpegPathField.setPromptText("ffmpeg  (or full path)");
+        videoLocalGrid.add(lookupField(ffmpegPathField, "ffmpeg"), 1, vl); vl++;
+        videoLocalGrid.add(new Label("ESRGAN binary:"), 0, vl);
+        esrganBinaryPathField = new TextField(currentEnhancement.esrganBinaryPath());
+        esrganBinaryPathField.setPrefWidth(300);
+        esrganBinaryPathField.setPromptText("/usr/local/bin/realesrgan-ncnn-vulkan");
+        videoLocalGrid.add(lookupField(esrganBinaryPathField, "realesrgan-ncnn-vulkan"), 1, vl); vl++;
+        bindToCheck(ffmpegEsrganEnabledCheck, ffmpegPathField);
+        bindToCheck(ffmpegEsrganEnabledCheck, esrganBinaryPathField);
+        videoLocalGrid.add(new Separator(), 0, vl, 2, 1); vl++;
+
+        // video2x
+        videoLocalGrid.add(toolHeading("video2x",
+            "Open-source video upscaling tool that chains FFmpeg with Real-ESRGAN, Waifu2x, or SRMD. " +
+            "Easy to use, GPU-accelerated. No API costs.",
+            "How do I install video2x on a Mac for video upscaling? " +
+            "pip install video2x, or download binary from github.com/k4yt3x/video2x/releases"),
+            0, vl, 2, 1); vl++;
+        video2xEnabledCheck = new CheckBox("Enabled");
+        video2xEnabledCheck.setSelected(currentEnhancement.video2xEnabled());
+        videoLocalGrid.add(video2xEnabledCheck, 0, vl, 2, 1); vl++;
+        videoLocalGrid.add(new Label("video2x path:"), 0, vl);
+        video2xPathField = new TextField(currentEnhancement.video2xPath());
+        video2xPathField.setPrefWidth(300);
+        video2xPathField.setPromptText("video2x  (or full path)");
+        videoLocalGrid.add(lookupField(video2xPathField, "video2x"), 1, vl);
+        bindToCheck(video2xEnabledCheck, video2xPathField);
+
+        // ── Sub-TabPane: Image Cloud / Image Local / Video Cloud / Video Local ─
+        TabPane subTabs = new TabPane();
+        subTabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        subTabs.getTabs().addAll(
+            new Tab("Image · Cloud",  new ScrollPane(imageCloudGrid) {{ setFitToWidth(true); }}),
+            new Tab("Image · Local",  new ScrollPane(imageLocalGrid) {{ setFitToWidth(true); }}),
+            new Tab("Video · Cloud",  new ScrollPane(videoCloudGrid) {{ setFitToWidth(true); }}),
+            new Tab("Video · Local",  new ScrollPane(videoLocalGrid) {{ setFitToWidth(true); }})
+        );
+
+        VBox aiTabContent = new VBox(0, globalGrid, new Separator(), subTabs);
+        VBox.setVgrow(subTabs, javafx.scene.layout.Priority.ALWAYS);
+
+        // ── Top-level tabs ────────────────────────────────────────────────────
         TabPane tabPane = new TabPane();
         tabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
         tabPane.getTabs().addAll(
             new Tab("Organize", organizeGrid),
-            new Tab("AI Enhancement", aiScroll)
+            new Tab("AI Enhancement", aiTabContent)
         );
         tabPane.setPrefHeight(560);
 
@@ -410,6 +568,38 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
     private void bindToCheck(CheckBox check, Control field) {
         field.setDisable(!check.isSelected());
         check.selectedProperty().addListener((obs, o, n) -> field.setDisable(!n));
+    }
+
+    /**
+     * Wraps a TextField in an HBox with a small "Find" button that runs
+     * `which <binaryName>` and populates the field on success.
+     */
+    private HBox lookupField(TextField field, String binaryName) {
+        Button findBtn = new Button("Find");
+        findBtn.setStyle("-fx-font-size: 0.82em;");
+        findBtn.setTooltip(new Tooltip("Run `which " + binaryName + "` to locate the binary"));
+        findBtn.setOnAction(e -> {
+            try {
+                Process p = new ProcessBuilder("which", binaryName).start();
+                String found = new BufferedReader(new InputStreamReader(p.getInputStream()))
+                    .lines().findFirst().orElse("").trim();
+                p.waitFor();
+                if (!found.isEmpty()) {
+                    field.setText(found);
+                } else {
+                    Alert alert = new Alert(Alert.AlertType.INFORMATION);
+                    alert.setTitle("Not Found");
+                    alert.setHeaderText(null);
+                    alert.setContentText("`" + binaryName + "` was not found on PATH.");
+                    alert.showAndWait();
+                }
+            } catch (Exception ex) {
+                // silently ignore — which not available on this platform
+            }
+        });
+        HBox box = new HBox(6, field, findBtn);
+        box.setAlignment(Pos.CENTER_LEFT);
+        return box;
     }
 
     private void openSearch(String query) {
@@ -484,6 +674,12 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
             comfyUiEnabledCheck.isSelected(), comfyUiUrlField.getText().trim(),
             current.comfyUiCheckpoint(), current.comfyUiCheckpoints(),
             invokeAiEnabledCheck.isSelected(), invokeAiUrlField.getText().trim(),
+            topazEnabledCheck.isSelected(), topazKeyField.getText().trim(),
+            runwayEnabledCheck.isSelected(), runwayKeyField.getText().trim(),
+            pikaEnabledCheck.isSelected(), pikaKeyField.getText().trim(),
+            klingEnabledCheck.isSelected(), klingKeyField.getText().trim(),
+            ffmpegEsrganEnabledCheck.isSelected(), ffmpegPathField.getText().trim(), esrganBinaryPathField.getText().trim(),
+            video2xEnabledCheck.isSelected(), video2xPathField.getText().trim(),
             prompts,
             checkedTitles,
             debugProtocolEnabled

@@ -6,7 +6,6 @@ import com.albumorganizer.model.DirectoryNode;
 import com.albumorganizer.model.MediaFile;
 import com.albumorganizer.model.MediaType;
 import com.albumorganizer.model.FileIndexEntry;
-import javafx.collections.FXCollections;
 import com.albumorganizer.model.AlbumOrganizerSettings;
 import com.albumorganizer.model.AppSettings;
 import com.albumorganizer.model.AppUsage;
@@ -39,10 +38,41 @@ import javafx.concurrent.Task;
 import javafx.concurrent.WorkerStateEvent;
 import javafx.fxml.FXML;
 import javafx.geometry.Pos;
-import javafx.scene.control.*;
+import javafx.scene.control.Alert;
+import javafx.scene.control.Button;
+import javafx.scene.control.ButtonBar;
+import javafx.scene.control.ButtonType;
+import javafx.scene.control.CheckBox;
+import javafx.scene.control.CheckMenuItem;
+import javafx.scene.control.ContextMenu;
+import javafx.scene.control.Dialog;
+import javafx.scene.control.Label;
+import javafx.scene.control.ListView;
+import javafx.scene.control.Menu;
+import javafx.scene.control.MenuItem;
+import javafx.scene.control.ProgressBar;
+import javafx.scene.control.ProgressIndicator;
+import javafx.scene.control.RadioMenuItem;
+import javafx.scene.control.ScrollPane;
+import javafx.scene.control.Separator;
+import javafx.scene.control.SeparatorMenuItem;
+import javafx.scene.control.SplitPane;
+import javafx.scene.control.TableCell;
+import javafx.scene.control.TableColumn;
+import javafx.scene.control.TableRow;
+import javafx.scene.control.TableView;
+import javafx.scene.control.Tooltip;
+import javafx.scene.control.TreeCell;
+import javafx.scene.control.TreeItem;
+import javafx.scene.control.TreeView;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
-import javafx.scene.layout.*;
+import javafx.scene.layout.AnchorPane;
+import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.FlowPane;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.StackPane;
+import javafx.scene.layout.VBox;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.Stage;
 import org.slf4j.Logger;
@@ -150,7 +180,6 @@ public class MainController {
     private Path currentSelectedDirectory; // Currently selected directory for on-demand scanning
     private com.albumorganizer.service.enhancement.EnhancementProvider lastUsedProvider = null;
     private MediaFile selectedThumbnailFile = null;
-    private String lastUsedPromptTitle = null; // kept for back-compat, unused
     private String lastAdditionalPrompt = "";
     private List<String> lastCheckedPromptTitles = new ArrayList<>();
     private String currentSortField = "name";
@@ -203,6 +232,9 @@ public class MainController {
         appUsage.applyTo(settings);
         applyDefaultSpecialFolders();
         applyFontSize();
+
+        // Auto-detect local tools in background; save updated settings if any were found
+        autoDetectLocalToolsAsync(appSettings);
 
         // Load saved folders (needs settings to be initialized)
         loadBaseFolders();
@@ -1261,20 +1293,7 @@ public class MainController {
             },
             pp -> {
                 AppSettings s = settingsRepository.load();
-                settingsRepository.save(new AppSettings(
-                    s.organizeMode(), s.createYearFolder(), s.createMonthFolder(), s.createDayFolder(),
-                    s.splitLowRes(), s.splitMedRes(), s.lowResThresholdPixels(), s.hiResThresholdPixels(),
-                    s.targetFolder(), s.aiGeneratedFolder(), s.recycleBinFolder(), s.albumFolders(),
-                    s.stabilityAiEnabled(), s.stabilityAiKey(),
-                    s.openAiEnabled(), s.openAiKey(),
-                    s.geminiEnabled(), s.geminiKey(), pp.geminiTemperature(),
-                    s.grokEnabled(), s.grokKey(), pp.grokModel(),
-                    s.sdLocalEnabled(), s.sdLocalUrl(),
-                    s.realEsrganEnabled(), s.realEsrganModelPath(),
-                    s.comfyUiEnabled(), s.comfyUiUrl(),
-                    s.invokeAiEnabled(), s.invokeAiUrl(),
-                    s.debugProtocol()
-                ));
+                settingsRepository.save(s.withProviderParams(pp.geminiTemperature(), pp.grokModel()));
             },
             outputDir);
         dialog.initOwner(rootPane.getScene().getWindow());
@@ -1433,20 +1452,7 @@ public class MainController {
             },
             pp -> {
                 AppSettings s = settingsRepository.load();
-                settingsRepository.save(new AppSettings(
-                    s.organizeMode(), s.createYearFolder(), s.createMonthFolder(), s.createDayFolder(),
-                    s.splitLowRes(), s.splitMedRes(), s.lowResThresholdPixels(), s.hiResThresholdPixels(),
-                    s.targetFolder(), s.aiGeneratedFolder(), s.recycleBinFolder(), s.albumFolders(),
-                    s.stabilityAiEnabled(), s.stabilityAiKey(),
-                    s.openAiEnabled(), s.openAiKey(),
-                    s.geminiEnabled(), s.geminiKey(), pp.geminiTemperature(),
-                    s.grokEnabled(), s.grokKey(), pp.grokModel(),
-                    s.sdLocalEnabled(), s.sdLocalUrl(),
-                    s.realEsrganEnabled(), s.realEsrganModelPath(),
-                    s.comfyUiEnabled(), s.comfyUiUrl(),
-                    s.invokeAiEnabled(), s.invokeAiUrl(),
-                    s.debugProtocol()
-                ));
+                settingsRepository.save(s.withProviderParams(pp.geminiTemperature(), pp.grokModel()));
             },
             aiDir);
         dialog.initOwner(rootPane.getScene().getWindow());
@@ -4183,5 +4189,126 @@ public class MainController {
         alert.setHeaderText(null);
         alert.setContentText(content);
         alert.showAndWait();
+    }
+
+    /**
+     * Probes local tool availability on a background thread and, if any tools are
+     * found that were not yet configured, persists updated settings automatically.
+     * ComfyUI is probed via an HTTP GET to its configured base URL.
+     */
+    private void autoDetectLocalToolsAsync(AppSettings saved) {
+        Thread t = new Thread(() -> {
+            boolean changed = false;
+
+            String ffmpegPath   = saved.ffmpegPath()   != null ? saved.ffmpegPath()   : "";
+            String esrganPath   = saved.esrganBinaryPath() != null ? saved.esrganBinaryPath() : "";
+            String video2xPath  = saved.video2xPath()  != null ? saved.video2xPath()  : "video2x";
+            boolean ffmpegEsrganEnabled = saved.ffmpegEsrganEnabled();
+            boolean video2xEnabled      = saved.video2xEnabled();
+
+            // ffmpeg
+            if (!ffmpegEsrganEnabled || ffmpegPath.isBlank()) {
+                String found = which("ffmpeg");
+                if (found != null) { ffmpegPath = found; changed = true; }
+            }
+
+            // realesrgan-ncnn-vulkan (ESRGAN part of ffmpeg+esrgan pipeline)
+            if (!ffmpegEsrganEnabled || esrganPath.isBlank()) {
+                String found = which("realesrgan-ncnn-vulkan");
+                if (found != null) { esrganPath = found; changed = true; }
+            }
+
+            // Auto-enable ffmpegEsrgan if both binaries are now known
+            if (!ffmpegEsrganEnabled && !ffmpegPath.isBlank() && !esrganPath.isBlank()) {
+                ffmpegEsrganEnabled = true;
+                changed = true;
+            }
+
+            // video2x
+            if (!video2xEnabled || video2xPath.isBlank() || video2xPath.equals("video2x")) {
+                String found = which("video2x");
+                if (found != null) {
+                    video2xPath = found;
+                    video2xEnabled = true;
+                    changed = true;
+                }
+            }
+
+            // ComfyUI — probe HTTP
+            boolean comfyEnabled = saved.comfyUiEnabled();
+            String comfyUrl = saved.comfyUiUrl();
+            if (!comfyEnabled) {
+                String url = (comfyUrl != null && !comfyUrl.isBlank()) ? comfyUrl : "http://localhost:8188";
+                try {
+                    java.net.HttpURLConnection conn = (java.net.HttpURLConnection)
+                        new java.net.URL(url + "/history").openConnection();
+                    conn.setConnectTimeout(1500);
+                    conn.setReadTimeout(1500);
+                    conn.setRequestMethod("GET");
+                    int code = conn.getResponseCode();
+                    conn.disconnect();
+                    if (code >= 200 && code < 400) {
+                        comfyEnabled = true;
+                        comfyUrl = url;
+                        changed = true;
+                        logger.info("Auto-detected ComfyUI at {}", url);
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            if (!changed) return;
+
+            // Build updated AppSettings and persist
+            final String finalFfmpeg      = ffmpegPath;
+            final String finalEsrgan      = esrganPath;
+            final boolean finalFfmpegEn   = ffmpegEsrganEnabled;
+            final String finalVideo2x     = video2xPath;
+            final boolean finalVideo2xEn  = video2xEnabled;
+            final boolean finalComfyEn    = comfyEnabled;
+            final String finalComfyUrl    = comfyUrl;
+
+            AppSettings updated = new AppSettings(
+                saved.organizeMode(),
+                saved.createYearFolder(), saved.createMonthFolder(), saved.createDayFolder(),
+                saved.splitLowRes(), saved.splitMedRes(),
+                saved.lowResThresholdPixels(), saved.hiResThresholdPixels(),
+                saved.targetFolder(), saved.aiGeneratedFolder(), saved.recycleBinFolder(), saved.albumFolders(),
+                saved.stabilityAiEnabled(), saved.stabilityAiKey(),
+                saved.openAiEnabled(), saved.openAiKey(),
+                saved.geminiEnabled(), saved.geminiKey(), saved.geminiTemperature(),
+                saved.grokEnabled(), saved.grokKey(), saved.grokModel(),
+                saved.sdLocalEnabled(), saved.sdLocalUrl(),
+                saved.realEsrganEnabled(), saved.realEsrganModelPath(),
+                finalComfyEn, finalComfyUrl,
+                saved.invokeAiEnabled(), saved.invokeAiUrl(),
+                saved.topazEnabled(), saved.topazKey(),
+                saved.runwayEnabled(), saved.runwayKey(),
+                saved.pikaEnabled(), saved.pikaKey(),
+                saved.klingEnabled(), saved.klingKey(),
+                finalFfmpegEn, finalFfmpeg, finalEsrgan,
+                finalVideo2xEn, finalVideo2x,
+                saved.debugProtocol()
+            );
+            settingsRepository.save(updated);
+            imageEnhancementService.reloadProviders();
+            logger.info("Auto-detected local tools: ffmpegEsrgan={} video2x={} comfyUi={}",
+                finalFfmpegEn, finalVideo2xEn, finalComfyEn);
+        }, "auto-detect-tools");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /** Runs `which <binary>` and returns the trimmed path, or null if not found. */
+    private static String which(String binary) {
+        try {
+            Process p = new ProcessBuilder("which", binary).start();
+            String result = new java.io.BufferedReader(
+                new java.io.InputStreamReader(p.getInputStream()))
+                .lines().findFirst().orElse("").trim();
+            p.waitFor();
+            return result.isEmpty() ? null : result;
+        } catch (Exception e) {
+            return null;
+        }
     }
 }

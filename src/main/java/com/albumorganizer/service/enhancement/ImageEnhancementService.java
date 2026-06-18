@@ -106,6 +106,26 @@ public class ImageEnhancementService {
         if (cfg.realEsrganEnabled()) {
             providers.add(new RealEsrganProvider(cfg.realEsrganModelPath()));
         }
+        // Cloud video providers
+        if (cfg.topazEnabled() && !cfg.topazKey().isBlank()) {
+            providers.add(new TopazVideoAIProvider(cfg.topazKey()));
+        }
+        if (cfg.runwayEnabled() && !cfg.runwayKey().isBlank()) {
+            providers.add(new RunwayMLProvider(cfg.runwayKey()));
+        }
+        if (cfg.pikaEnabled() && !cfg.pikaKey().isBlank()) {
+            providers.add(new PikaLabsProvider(cfg.pikaKey()));
+        }
+        if (cfg.klingEnabled() && !cfg.klingKey().isBlank()) {
+            providers.add(new KlingAIProvider(cfg.klingKey()));
+        }
+        // Local video providers
+        if (cfg.ffmpegEsrganEnabled()) {
+            providers.add(new FFmpegEsrganProvider(cfg.ffmpegPath(), cfg.esrganBinaryPath()));
+        }
+        if (cfg.video2xEnabled()) {
+            providers.add(new Video2xProvider(cfg.video2xPath()));
+        }
     }
 
     public List<EnhancementProvider> getConfiguredProviders() {

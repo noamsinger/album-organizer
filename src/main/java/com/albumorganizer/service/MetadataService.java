@@ -237,19 +237,9 @@ public class MetadataService {
     }
 
     /**
-     * Gets the date taken from EXIF metadata for photos.
-     *
-     * @param file the file to get date taken from
-     * @return Instant of when photo was taken, or null if unavailable
-     */
-    /**
      * Gets the date taken from image EXIF metadata.
      * Note: EXIF dates don't include timezone info, so they're interpreted as UTC.
-     * The returned Instant represents the same date/time values from EXIF, but in UTC.
      * Returns null if the date is invalid (year not in range 1800-2099).
-     *
-     * @param file the image file to extract date from
-     * @return Instant representing the date taken (interpreted as UTC), or null if unavailable or invalid
      */
     public Instant getDateTaken(Path file) {
         try {
@@ -258,33 +248,15 @@ public class MetadataService {
             // Try ExifSubIFDDirectory for DateTimeOriginal
             ExifSubIFDDirectory subIFD = metadata.getFirstDirectoryOfType(ExifSubIFDDirectory.class);
             if (subIFD != null) {
-                Date dateOriginal = subIFD.getDate(ExifSubIFDDirectory.TAG_DATETIME_ORIGINAL);
-                if (dateOriginal != null) {
-                    // EXIF dates don't have timezone info - treat as UTC
-                    Instant instant = dateOriginal.toInstant();
-                    if (isValidDateRange(instant)) {
-                        return instant;
-                    } else {
-                        logger.debug("EXIF date is outside valid range (1800-2099) for file: {}", file);
-                        return null;
-                    }
-                }
+                Instant instant = toValidInstant(subIFD.getDate(ExifSubIFDDirectory.TAG_DATETIME_ORIGINAL), file);
+                if (instant != null) return instant;
             }
 
             // Fallback to ExifIFD0Directory DateTime
             ExifIFD0Directory exifDir = metadata.getFirstDirectoryOfType(ExifIFD0Directory.class);
             if (exifDir != null) {
-                Date dateTime = exifDir.getDate(ExifIFD0Directory.TAG_DATETIME);
-                if (dateTime != null) {
-                    // EXIF dates don't have timezone info - treat as UTC
-                    Instant instant = dateTime.toInstant();
-                    if (isValidDateRange(instant)) {
-                        return instant;
-                    } else {
-                        logger.debug("EXIF date is outside valid range (1800-2099) for file: {}", file);
-                        return null;
-                    }
-                }
+                Instant instant = toValidInstant(exifDir.getDate(ExifIFD0Directory.TAG_DATETIME), file);
+                if (instant != null) return instant;
             }
 
             // Try QuickTimeDirectory for MOV files
@@ -325,6 +297,14 @@ public class MetadataService {
      * @param instant the instant to validate
      * @return true if the year is between 1800 and 2099, false otherwise
      */
+    private Instant toValidInstant(Date date, Path file) {
+        if (date == null) return null;
+        Instant instant = date.toInstant();
+        if (isValidDateRange(instant)) return instant;
+        logger.debug("EXIF date is outside valid range (1800-2099) for file: {}", file);
+        return null;
+    }
+
     private boolean isValidDateRange(Instant instant) {
         if (instant == null) {
             return false;

@@ -48,6 +48,23 @@ public record AppSettings(
     boolean invokeAiEnabled,
     String invokeAiUrl,
 
+    // Cloud video providers
+    boolean topazEnabled,
+    String topazKey,
+    boolean runwayEnabled,
+    String runwayKey,
+    boolean pikaEnabled,
+    String pikaKey,
+    boolean klingEnabled,
+    String klingKey,
+
+    // Local video providers
+    boolean ffmpegEsrganEnabled,
+    String ffmpegPath,
+    String esrganBinaryPath,
+    boolean video2xEnabled,
+    String video2xPath,
+
     boolean debugProtocol
 ) {
     public static AppSettings defaults() {
@@ -66,6 +83,12 @@ public record AppSettings(
             false, "",
             false, "http://localhost:8188",
             false, "http://localhost:9090",
+            false, "",
+            false, "",
+            false, "",
+            false, "",
+            false, "", "",
+            false, "video2x",
             false
         );
     }
@@ -87,8 +110,14 @@ public record AppSettings(
             e.grokEnabled(), e.grokKey(), e.grokModel(),
             e.sdLocalEnabled(), e.sdLocalUrl(),
             e.realEsrganEnabled(), e.realEsrganModelPath(),
-            e.comfyUiEnabled(), e.comfyUiUrl(),
-            e.invokeAiEnabled(), e.invokeAiUrl(),
+            e.comfyUiEnabled(), nullToEmpty(e.comfyUiUrl(), "http://localhost:8188"),
+            e.invokeAiEnabled(), nullToEmpty(e.invokeAiUrl(), "http://localhost:9090"),
+            e.topazEnabled(), e.topazKey(),
+            e.runwayEnabled(), e.runwayKey(),
+            e.pikaEnabled(), e.pikaKey(),
+            e.klingEnabled(), e.klingKey(),
+            e.ffmpegEsrganEnabled(), e.ffmpegPath(), e.esrganBinaryPath(),
+            e.video2xEnabled(), e.video2xPath(),
             e.debugProtocol()
         );
     }
@@ -124,8 +153,38 @@ public record AppSettings(
             nullToEmpty(usage.comfyUiCheckpoint()),
             usage.comfyUiCheckpoints() != null ? usage.comfyUiCheckpoints() : List.of(),
             invokeAiEnabled, nullToEmpty(invokeAiUrl, "http://localhost:9090"),
+            topazEnabled, nullToEmpty(topazKey),
+            runwayEnabled, nullToEmpty(runwayKey),
+            pikaEnabled, nullToEmpty(pikaKey),
+            klingEnabled, nullToEmpty(klingKey),
+            ffmpegEsrganEnabled, nullToEmpty(ffmpegPath), nullToEmpty(esrganBinaryPath),
+            video2xEnabled, nullToEmpty(video2xPath, "video2x"),
             usage.savedPrompts() != null ? usage.savedPrompts() : List.of(),
             usage.checkedPromptTitles() != null ? usage.checkedPromptTitles() : List.of(),
+            debugProtocol
+        );
+    }
+
+    /** Return a copy of this record with only geminiTemperature and grokModel updated. */
+    public AppSettings withProviderParams(double newGeminiTemperature, String newGrokModel) {
+        return new AppSettings(
+            organizeMode, createYearFolder, createMonthFolder, createDayFolder,
+            splitLowRes, splitMedRes, lowResThresholdPixels, hiResThresholdPixels,
+            targetFolder, aiGeneratedFolder, recycleBinFolder, albumFolders,
+            stabilityAiEnabled, stabilityAiKey,
+            openAiEnabled, openAiKey,
+            geminiEnabled, geminiKey, newGeminiTemperature,
+            grokEnabled, grokKey, newGrokModel,
+            sdLocalEnabled, sdLocalUrl,
+            realEsrganEnabled, realEsrganModelPath,
+            comfyUiEnabled, comfyUiUrl,
+            invokeAiEnabled, invokeAiUrl,
+            topazEnabled, topazKey,
+            runwayEnabled, runwayKey,
+            pikaEnabled, pikaKey,
+            klingEnabled, klingKey,
+            ffmpegEsrganEnabled, ffmpegPath, esrganBinaryPath,
+            video2xEnabled, video2xPath,
             debugProtocol
         );
     }

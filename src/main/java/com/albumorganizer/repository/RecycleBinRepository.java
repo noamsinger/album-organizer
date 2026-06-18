@@ -1,12 +1,21 @@
 package com.albumorganizer.repository;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.reflect.TypeToken;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.*;
+import java.io.IOException;
+import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.*;
-import java.util.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * Persists the mapping of files in the recycle-bin folder to their original paths.
@@ -17,6 +26,8 @@ public class RecycleBinRepository {
     private static final Logger logger = LoggerFactory.getLogger(RecycleBinRepository.class);
     private static final Path INDEX_FILE = Paths.get(
         System.getProperty("user.home"), ".config", "album-organizer", "recycle-bin-index.json");
+    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+    private static final Type MAP_TYPE = new TypeToken<LinkedHashMap<String, String>>() {}.getType();
 
     // bin absolute path -> original absolute path
     private final Map<String, String> index = new LinkedHashMap<>();
@@ -52,7 +63,8 @@ public class RecycleBinRepository {
         if (!Files.exists(INDEX_FILE)) return;
         try {
             String json = Files.readString(INDEX_FILE, StandardCharsets.UTF_8);
-            parseJson(json);
+            Map<String, String> loaded = GSON.fromJson(json, MAP_TYPE);
+            if (loaded != null) index.putAll(loaded);
         } catch (IOException e) {
             logger.error("Failed to load recycle-bin index", e);
         }
@@ -61,51 +73,11 @@ public class RecycleBinRepository {
     public void save() {
         try {
             Files.createDirectories(INDEX_FILE.getParent());
-            StringBuilder sb = new StringBuilder("{\n");
-            Iterator<Map.Entry<String, String>> it = index.entrySet().iterator();
-            while (it.hasNext()) {
-                Map.Entry<String, String> e = it.next();
-                sb.append("  ").append(jsonString(e.getKey()))
-                  .append(": ").append(jsonString(e.getValue()));
-                if (it.hasNext()) sb.append(",");
-                sb.append("\n");
-            }
-            sb.append("}");
-            Files.writeString(INDEX_FILE, sb.toString(), StandardCharsets.UTF_8);
+            Path tmp = INDEX_FILE.resolveSibling(INDEX_FILE.getFileName() + ".tmp");
+            Files.writeString(tmp, GSON.toJson(index), StandardCharsets.UTF_8);
+            Files.move(tmp, INDEX_FILE, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } catch (IOException e) {
             logger.error("Failed to save recycle-bin index", e);
         }
-    }
-
-    private void parseJson(String json) {
-        index.clear();
-        // Simple hand-rolled parser: expects flat {"key": "value", ...}
-        json = json.trim();
-        if (json.startsWith("{")) json = json.substring(1);
-        if (json.endsWith("}")) json = json.substring(0, json.length() - 1);
-        // Split on "," that are not inside strings — use line-based approach (one entry per line)
-        for (String line : json.split("\n")) {
-            line = line.trim();
-            if (line.endsWith(",")) line = line.substring(0, line.length() - 1).trim();
-            int colon = line.indexOf("\":");
-            if (colon < 0) continue;
-            String key = unquote(line.substring(0, colon + 1).trim());
-            String val = unquote(line.substring(colon + 2).trim());
-            if (key != null && val != null) index.put(key, val);
-        }
-    }
-
-    private static String jsonString(String s) {
-        return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
-    }
-
-    private static String unquote(String s) {
-        if (s == null || s.length() < 2) return null;
-        if (s.startsWith("\"") && s.endsWith("\"")) {
-            return s.substring(1, s.length() - 1)
-                    .replace("\\\"", "\"")
-                    .replace("\\\\", "\\");
-        }
-        return null;
     }
 }
