@@ -19,17 +19,17 @@
         <maven.compiler.target>17</maven.compiler.target>
         <!-- JavaFX 25+ requires Java 21; pinned to 21.x LTS until we upgrade the compiler target -->
         <javafx.version>21.0.7</javafx.version>
-        <metadata.extractor.version>2.19.0</metadata.extractor.version>
+        <metadata.extractor.version>2.20.0</metadata.extractor.version>
         <commons.io.version>2.22.0</commons.io.version>
         <commons.codec.version>1.22.0</commons.codec.version>
         <commons.compress.version>1.28.0</commons.compress.version>
-        <guava.version>33.4.8-jre</guava.version>
+        <guava.version>33.6.0-jre</guava.version>
         <!-- slf4j 2.1.x is still alpha; 2.0.x is the latest stable line -->
         <slf4j.version>2.0.17</slf4j.version>
-        <logback.version>1.5.18</logback.version>
+        <logback.version>1.5.34</logback.version>
         <junit.version>5.12.2</junit.version>
         <testfx.version>4.0.18</testfx.version>
-        <mockito.version>5.18.0</mockito.version>
+        <mockito.version>5.23.0</mockito.version>
     </properties>
 
     <dependencies>
@@ -101,14 +101,14 @@
         <dependency>
             <groupId>org.bytedeco</groupId>
             <artifactId>javacv-platform</artifactId>
-            <version>1.5.11</version>
+            <version>1.5.13</version>
         </dependency>
 
         <!-- ONNX Runtime for Real-ESRGAN local inference -->
         <dependency>
             <groupId>com.microsoft.onnxruntime</groupId>
             <artifactId>onnxruntime</artifactId>
-            <version>1.22.0</version>
+            <version>1.26.0</version>
         </dependency>
 
         <!-- Logging -->
@@ -276,7 +276,7 @@
             <plugin>
                 <groupId>org.panteleyev</groupId>
                 <artifactId>jpackage-maven-plugin</artifactId>
-                <version>1.6.6</version>
+                <version>1.7.4</version>
                 <configuration>
                     <name>Album Organizer</name>
                     <appVersion>${project.version}</appVersion>
