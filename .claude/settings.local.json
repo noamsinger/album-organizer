@@ -41,7 +41,13 @@
       "Bash(grep -v \"^$\")",
       "Bash(pkill -f \"album-organizer\")",
       "Bash(cat)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(mvn versions:display-dependency-updates versions:display-plugin-updates)",
+      "WebFetch(domain:docs.klingai.com)",
+      "WebFetch(domain:docs.pika.art)",
+      "WebFetch(domain:docs.dev.runwayml.com)",
+      "WebFetch(domain:docs.topazlabs.com)",
+      "WebFetch(domain:klingai.com)"
     ]
   }
 }

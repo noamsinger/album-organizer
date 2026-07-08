@@ -33,13 +33,11 @@ public class QuickScanStrategy {
 
     private static final Logger logger = LoggerFactory.getLogger(QuickScanStrategy.class);
 
-    private final HashService hashService;
     private final MetadataService metadataService;
     private final ScannerService scannerService;
     private Consumer<MediaFile> fileDiscoveryCallback = null;
 
-    public QuickScanStrategy(HashService hashService, MetadataService metadataService, ScannerService scannerService) {
-        this.hashService = hashService;
+    public QuickScanStrategy(MetadataService metadataService, ScannerService scannerService) {
         this.metadataService = metadataService;
         this.scannerService = scannerService;
     }
@@ -133,7 +131,6 @@ public class QuickScanStrategy {
 
         // Get basic file attributes
         BasicFileAttributes attrs = Files.readAttributes(file, BasicFileAttributes.class);
-        Instant lastModified = attrs.lastModifiedTime().toInstant();
         long size = attrs.size();
 
         // Determine media type
@@ -146,17 +143,11 @@ public class QuickScanStrategy {
         MediaFile mediaFile = new MediaFile(
             file.getFileName().toString(),
             file,
-            lastModified,
             type,
             size
         );
 
         mediaFile.setLocation(file.getParent().toString());
-
-        // QUICK SCAN: Skip hash calculation for speed
-        // Hash will be null - use deep scan if you need hashes
-        mediaFile.setSha1Hash(null);
-        logger.debug("Quick scan: skipping hash for {}", file.getFileName());
 
         // Extract metadata (resolution, etc.)
         try {

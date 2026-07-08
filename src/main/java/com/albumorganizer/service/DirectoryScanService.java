@@ -11,63 +11,34 @@ import java.io.IOException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.function.BiConsumer;
 
-/**
- * Service for scanning a single directory (non-recursive) on-demand.
- * Used when user selects a folder in the tree view.
- */
 public class DirectoryScanService {
 
     private static final Logger logger = LoggerFactory.getLogger(DirectoryScanService.class);
 
-    private final HashService hashService;
     private final MetadataService metadataService;
 
     public DirectoryScanService() {
-        this.hashService = new HashService();
         this.metadataService = new MetadataService();
     }
 
-    public DirectoryScanService(HashService hashService, MetadataService metadataService) {
-        this.hashService = hashService;
+    public DirectoryScanService(MetadataService metadataService) {
         this.metadataService = metadataService;
     }
 
-    /**
-     * Scans a single directory (non-recursive) for media files.
-     * Uses existing hashes from the fileIndex where available, only recalculating
-     * when no hash is known for a file.
-     *
-     * @param directory the directory to scan
-     * @param existingHashes map of absolute path -> SHA-1 hash from the fileIndex
-     * @return list of media files found in this directory
-     */
-    public List<MediaFile> scanDirectory(Path directory, Map<Path, String> existingHashes) {
-        return doScanDirectory(directory, existingHashes, null);
-    }
-
-    public List<MediaFile> scanDirectory(Path directory, Map<Path, String> existingHashes, BiConsumer<Integer, Integer> progressCallback) {
-        return doScanDirectory(directory, existingHashes, progressCallback);
-    }
-
-    /**
-     * Scans a single directory (non-recursive) for media files.
-     * Performs full scan - no cache optimization currently.
-     *
-     * @param directory the directory to scan
-     * @return list of media files found in this directory
-     */
     public List<MediaFile> scanDirectory(Path directory) {
-        return doScanDirectory(directory, null, null);
+        return doScanDirectory(directory, null);
     }
 
-    private List<MediaFile> doScanDirectory(Path directory, Map<Path, String> existingHashes, BiConsumer<Integer, Integer> progressCallback) {
+    public List<MediaFile> scanDirectory(Path directory, BiConsumer<Integer, Integer> progressCallback) {
+        return doScanDirectory(directory, progressCallback);
+    }
+
+    private List<MediaFile> doScanDirectory(Path directory, BiConsumer<Integer, Integer> progressCallback) {
         if (directory == null || !Files.exists(directory) || !Files.isDirectory(directory)) {
             logger.warn("Invalid directory: {}", directory);
             return new ArrayList<>();
@@ -77,55 +48,28 @@ public class DirectoryScanService {
         List<MediaFile> mediaFiles = new ArrayList<>();
 
         try {
-            // Get all files in this directory (non-recursive)
             List<Path> filesInDir = new ArrayList<>();
             try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory)) {
                 for (Path entry : stream) {
-                    if (Files.isRegularFile(entry)) {
-                        filesInDir.add(entry);
-                    }
+                    if (Files.isRegularFile(entry)) filesInDir.add(entry);
                 }
             }
 
-            // Process each file
             for (int i = 0; i < filesInDir.size(); i++) {
                 Path file = filesInDir.get(i);
                 String filename = file.getFileName().toString();
 
-                // Report progress
-                if (progressCallback != null) {
-                    progressCallback.accept(i + 1, filesInDir.size());
-                }
+                if (progressCallback != null) progressCallback.accept(i + 1, filesInDir.size());
 
-                // Check if it's a media file
                 MediaType type = FileTypeDetector.getMediaType(file);
-                if (type == null) {
-                    continue; // Not a media file
-                }
+                if (type == null) continue;
 
                 try {
-                    BasicFileAttributes attrs = Files.readAttributes(file, BasicFileAttributes.class);
-                    Instant lastModified = attrs.lastModifiedTime().toInstant();
-                    long sizeBytes = attrs.size();
-
-                    // Use existing hash from fileIndex if available, otherwise calculate
-                    String hash;
-                    if (existingHashes != null && existingHashes.containsKey(file)) {
-                        hash = existingHashes.get(file);
-                        logger.trace("Reusing existing hash for: {}", filename);
-                    } else {
-                        hash = hashService.calculateHash(file);
-                        logger.trace("Calculated hash for: {}", filename);
-                    }
-
-                    // Create MediaFile object with full metadata
-                    MediaFile mediaFile = new MediaFile(filename, file, lastModified, type, sizeBytes);
-                    mediaFile.setSha1Hash(hash);
+                    long sizeBytes = Files.size(file);
+                    MediaFile mediaFile = new MediaFile(filename, file, type, sizeBytes);
                     mediaFile.setLocation(directory.toString());
 
-                    // Extract metadata (resolution, date taken, duration)
                     try {
-                        // First check if file is valid
                         boolean isValid = metadataService.isValidMediaFile(file);
                         mediaFile.setCorrupted(!isValid);
 
@@ -138,10 +82,9 @@ public class DirectoryScanService {
                                 mediaFile.setDateTaken(dateTaken);
                                 mediaFile.setDateEstimated(false);
                             } else {
-                                // Try to estimate date from filename
-                                Instant estimatedDate = com.albumorganizer.util.DateEstimator.estimateFromFilename(file.getFileName().toString());
-                                if (estimatedDate != null) {
-                                    mediaFile.setDateTaken(estimatedDate);
+                                Instant estimated = com.albumorganizer.util.DateEstimator.estimateFromFilename(filename);
+                                if (estimated != null) {
+                                    mediaFile.setDateTaken(estimated);
                                     mediaFile.setDateEstimated(true);
                                 }
                             }
@@ -150,9 +93,7 @@ public class DirectoryScanService {
                                 Long duration = metadataService.getVideoDuration(file);
                                 mediaFile.setDurationSeconds(duration);
                                 int rotation = metadataService.getVideoRotation(file);
-                                if (rotation != 0) {
-                                    mediaFile.setOrientation(rotation);
-                                }
+                                if (rotation != 0) mediaFile.setOrientation(rotation);
                             } else {
                                 mediaFile.setOrientation(metadataService.getOrientation(file));
                             }
@@ -180,29 +121,16 @@ public class DirectoryScanService {
         return mediaFiles;
     }
 
-    /**
-     * Gets media file count in a directory without full scan.
-     * Does quick count of media files.
-     *
-     * @param directory the directory to check
-     * @return count of media files
-     */
     public int getMediaFileCount(Path directory) {
-        if (directory == null || !Files.exists(directory) || !Files.isDirectory(directory)) {
-            return 0;
-        }
-
+        if (directory == null || !Files.exists(directory) || !Files.isDirectory(directory)) return 0;
         try {
             int count = 0;
             try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory)) {
                 for (Path entry : stream) {
-                    if (Files.isRegularFile(entry) && FileTypeDetector.getMediaType(entry) != null) {
-                        count++;
-                    }
+                    if (Files.isRegularFile(entry) && FileTypeDetector.getMediaType(entry) != null) count++;
                 }
             }
             return count;
-
         } catch (IOException e) {
             logger.warn("Error counting files in: {}", directory, e);
             return 0;

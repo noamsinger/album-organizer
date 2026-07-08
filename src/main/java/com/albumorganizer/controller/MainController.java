@@ -5,7 +5,6 @@ import ch.qos.logback.classic.LoggerContext;
 import com.albumorganizer.model.DirectoryNode;
 import com.albumorganizer.model.MediaFile;
 import com.albumorganizer.model.MediaType;
-import com.albumorganizer.model.FileIndexEntry;
 import com.albumorganizer.model.AlbumOrganizerSettings;
 import com.albumorganizer.model.AppSettings;
 import com.albumorganizer.model.AppUsage;
@@ -13,7 +12,6 @@ import com.albumorganizer.model.ScanResult;
 import com.albumorganizer.repository.SettingsRepository;
 import com.albumorganizer.repository.UsageRepository;
 import com.albumorganizer.repository.RecycleBinRepository;
-import com.albumorganizer.repository.SnapshotRepository;
 import com.albumorganizer.service.ScannerService;
 import com.albumorganizer.service.DirectoryScanService;
 import com.albumorganizer.service.FileOrganizeService;
@@ -107,7 +105,6 @@ import java.util.stream.Collectors;
 public class MainController {
 
     private static final Logger logger = LoggerFactory.getLogger(MainController.class);
-    private static final String NO_HASH_KEY = "__NO_HASH__"; // Special key for files without hashes (quick scan)
     // Sentinel Image returned by loadThumbnailAsync to signal an audio-only file (no video stream)
     private static final javafx.scene.image.WritableImage AUDIO_ONLY_SENTINEL =
             new javafx.scene.image.WritableImage(1, 1);
@@ -129,7 +126,6 @@ public class MainController {
     @FXML private TableColumn<MediaFile, Number> sizeColumn;
     @FXML private TableColumn<MediaFile, String> resolutionColumn;
     @FXML private TableColumn<MediaFile, String> locationColumn;
-    @FXML private TableColumn<MediaFile, String> hashColumn;
     @FXML private Label statusLabel;
     @FXML private Label fileCountLabel;
     @FXML private Label errorCountLabel;
@@ -161,23 +157,22 @@ public class MainController {
     private final DirectoryScanService directoryScanService;
     private final SettingsRepository settingsRepository;
     private final UsageRepository usageRepository;
-    private final SnapshotRepository snapshotRepository;
     private final ThumbnailService thumbnailService;
     private final ArchiveScanService archiveScanService;
     private ImageEnhancementService imageEnhancementService;
-    private final Map<String, List<FileIndexEntry>> fileIndex; // Hash -> List of (directory, filename) pairs
+    private final Map<Path, List<Path>> scannedFiles; // directory -> list of absolute file paths
     private List<Path> baseFolders;
-    private List<Path> currentlyScannedFolders; // Track which folders are being scanned
+    private List<Path> currentlyScannedFolders;
     private ScanTask currentScanTask;
-    private Task<?> currentOrganizeTask; // Track organize task for stop button
-    private String preservedStatusMessage = null; // Preserve status message across automatic rescans
+    private Task<?> currentOrganizeTask;
+    private String preservedStatusMessage = null;
     private byte[] lastOrganizeReportCompressed = null;
     private String lastOrganizeReportTimestamp = null;
     private boolean thumbnailViewActive = false;
     private ObservableList<MediaFile> currentDisplayedFiles;
     private ExecutorService thumbnailLoadExecutor;
-    private AlbumOrganizerSettings settings; // All settings including targetFolder and fontSizeFactor
-    private Path currentSelectedDirectory; // Currently selected directory for on-demand scanning
+    private AlbumOrganizerSettings settings;
+    private Path currentSelectedDirectory;
     private com.albumorganizer.service.enhancement.EnhancementProvider lastUsedProvider = null;
     private MediaFile selectedThumbnailFile = null;
     private String lastAdditionalPrompt = "";
@@ -191,11 +186,10 @@ public class MainController {
         this.directoryScanService = new DirectoryScanService();
         this.settingsRepository = new SettingsRepository();
         this.usageRepository = new UsageRepository();
-        this.snapshotRepository = new SnapshotRepository();
         this.thumbnailService = new ThumbnailService();
         this.archiveScanService = new ArchiveScanService();
         this.imageEnhancementService = new ImageEnhancementService(settingsRepository);
-        this.fileIndex = new HashMap<>();
+        this.scannedFiles = new HashMap<>();
         this.baseFolders = new ArrayList<>();
         this.currentlyScannedFolders = new ArrayList<>();
         this.currentDisplayedFiles = FXCollections.observableArrayList();
@@ -238,9 +232,6 @@ public class MainController {
 
         // Load saved folders (needs settings to be initialized)
         loadBaseFolders();
-
-        // Load snapshot from compressed cache
-        loadSnapshot();
 
         // Build initial tree with album folders (even if not scanned)
         buildDirectoryTree();
@@ -309,21 +300,10 @@ public class MainController {
         filenameColumn.setCellValueFactory(data ->
             new javafx.beans.property.SimpleStringProperty(data.getValue().getFilename()));
 
-        // Date column - use UTC format like Date Taken
+        // Date column - hidden (no longer tracking file modification time)
         dateColumn.setCellValueFactory(data ->
-            new javafx.beans.property.SimpleObjectProperty<>(data.getValue().getLastModified()));
-        dateColumn.setCellFactory(column -> new TableCell<MediaFile, Instant>() {
-            @Override
-            protected void updateItem(Instant item, boolean empty) {
-                super.updateItem(item, empty);
-                if (empty || item == null) {
-                    setText(null);
-                } else {
-                    // Use same format as Date Taken (UTC format)
-                    setText(FormatUtils.formatDateTaken(item, false));
-                }
-            }
-        });
+            new javafx.beans.property.SimpleObjectProperty<>(null));
+        dateColumn.setVisible(false);
 
         // Type column
         typeColumn.setCellValueFactory(data ->
@@ -394,10 +374,6 @@ public class MainController {
             new javafx.beans.property.SimpleStringProperty(data.getValue().getLocation()));
         locationColumn.setVisible(false);
 
-        // Hash column - show full hash
-        hashColumn.setCellValueFactory(data ->
-            new javafx.beans.property.SimpleStringProperty(data.getValue().getSha1Hash()));
-
         // Set table items
         mediaTable.setItems(currentDisplayedFiles);
 
@@ -412,30 +388,11 @@ public class MainController {
                 protected void updateItem(MediaFile item, boolean empty) {
                     super.updateItem(item, empty);
 
-                    // Clear all style classes first
-                    getStyleClass().removeAll("duplicate", "corrupted");
+                    getStyleClass().remove("corrupted");
 
-                    if (empty || item == null) {
-                        // Remove inline styles to let CSS handle everything
-                    } else {
-                        String hash = item.getSha1Hash();
-
-                        // Check if this file is a duplicate (fileIndex has multiple entries for this hash)
-                        // Exclude NO_HASH_KEY files (quick scanned without hash)
-                        boolean isDuplicate = hash != null && !hash.isEmpty() && !hash.equals(NO_HASH_KEY)
-                            && fileIndex.containsKey(hash)
-                            && fileIndex.get(hash).size() > 1;
-
-                        // Corrupted files - add CSS class only
-                        if (item.isCorrupted()) {
-                            getStyleClass().add("corrupted");
-                            logger.debug("Styling CORRUPTED: {}", item.getFilename());
-                        }
-                        // Duplicate files - add CSS class only
-                        else if (isDuplicate) {
-                            getStyleClass().add("duplicate");
-                        }
-                        // Normal files have no special class
+                    if (!empty && item != null && item.isCorrupted()) {
+                        getStyleClass().add("corrupted");
+                        logger.debug("Styling CORRUPTED: {}", item.getFilename());
                     }
 
                     // Tooltip: show original path for files in the recycle bin
@@ -511,14 +468,6 @@ public class MainController {
             }
         });
 
-        MenuItem removeOtherDuplicatesItem = new MenuItem("Remove Other Duplicates");
-        removeOtherDuplicatesItem.setOnAction(e -> {
-            MediaFile selected = mediaTable.getSelectionModel().getSelectedItem();
-            if (selected != null) {
-                removeOtherDuplicates(selected);
-            }
-        });
-
         MenuItem deleteFileItem = new MenuItem("Delete File");
         deleteFileItem.setOnAction(e -> {
             MediaFile selected = mediaTable.getSelectionModel().getSelectedItem();
@@ -562,8 +511,6 @@ public class MainController {
         // Enable/disable menu items based on context
         contextMenu.setOnShowing(event -> {
             MediaFile selected = mediaTable.getSelectionModel().getSelectedItem();
-            boolean hasDuplicates = selected != null && hasDuplicates(selected);
-            removeOtherDuplicatesItem.setDisable(!hasDuplicates);
 
             boolean hasBin = settings != null && settings.getRecycleBinFolder() != null;
             boolean isInBin = selected != null && hasBin
@@ -598,7 +545,6 @@ public class MainController {
             copyFilenameItem,
             copyImageItem,
             new SeparatorMenuItem(),
-            removeOtherDuplicatesItem,
             deleteFileItem,
             permanentDeleteItem,
             restoreFromBinItem,
@@ -619,14 +565,6 @@ public class MainController {
             TreeItem<DirectoryNode> selected = directoryTree.getSelectionModel().getSelectedItem();
             if (selected != null && selected.getValue().isArchiveNode()) {
                 scanArchiveNode(selected);
-            }
-        });
-
-        MenuItem fullScanWithHashItem = new MenuItem("Full Scan with Hash");
-        fullScanWithHashItem.setOnAction(e -> {
-            TreeItem<DirectoryNode> selected = directoryTree.getSelectionModel().getSelectedItem();
-            if (selected != null && selected.getValue().getPath() != null) {
-                fullScanWithHashFolder(selected.getValue().getPath());
             }
         });
 
@@ -683,14 +621,6 @@ public class MainController {
             }
         });
 
-        MenuItem removeDuplicatesInFolderItem = new MenuItem("Remove Other Duplicates");
-        removeDuplicatesInFolderItem.setOnAction(e -> {
-            TreeItem<DirectoryNode> selected = directoryTree.getSelectionModel().getSelectedItem();
-            if (selected != null && selected.getValue().getPath() != null) {
-                removeOtherDuplicatesInSubtree(selected.getValue().getPath());
-            }
-        });
-
         // Enable/disable menu items based on selection
         contextMenu.setOnShowing(event -> {
             TreeItem<DirectoryNode> selected = directoryTree.getSelectionModel().getSelectedItem();
@@ -704,14 +634,7 @@ public class MainController {
                 && hasPath && !selected.getValue().getPath().startsWith(settings.getTargetFolder());
             boolean isArchive = selected != null && selected.getValue().isArchiveNode();
 
-            // "Remove Other Duplicates": need bin configured and at least one external duplicate in subtree
-            boolean hasBin = settings.getRecycleBinFolder() != null;
-            boolean hasExternalDuplicates = hasPath && !isRecycleBin && !isArchive
-                && subtreeHasExternalDuplicates(selected.getValue().getPath());
-            removeDuplicatesInFolderItem.setDisable(!hasBin || !hasExternalDuplicates);
-
             scanArchiveItem.setVisible(isArchive);
-            fullScanWithHashItem.setDisable(!hasPath || isArchive);
             quickScanItem.setDisable(!hasPath || isArchive);
             removeAlbumItem.setDisable(!isAlbum || isRecycleBin);
             makeTargetItem.setDisable(!isAlbum || isCurrentTarget || isRecycleBin);
@@ -720,13 +643,12 @@ public class MainController {
             organizeFolderRecursivelyItem.setDisable(!canOrganizeRecursively);
         });
 
-        Menu doMagicMenu = new Menu("Do Magic");
-        doMagicMenu.getItems().addAll(organizeFolderRecursivelyItem, removeDuplicatesInFolderItem);
+        Menu doMagicMenu = new Menu("Magic Organizer");
+        doMagicMenu.getItems().addAll(organizeFolderRecursivelyItem);
 
         contextMenu.getItems().addAll(
             scanArchiveItem,
             new SeparatorMenuItem(),
-            fullScanWithHashItem,
             quickScanItem,
             new SeparatorMenuItem(),
             openInBrowserItem,
@@ -868,25 +790,13 @@ public class MainController {
             progressBar.setManaged(true);
         }
 
-        // Build hash lookup from fileIndex to avoid recalculating hashes on display
-        Map<Path, String> knownHashes = new HashMap<>();
-        fileIndex.forEach((hash, entries) -> {
-            if (!hash.equals(NO_HASH_KEY)) {
-                for (FileIndexEntry entry : entries) {
-                    if (entry.getDirectory().equals(directory)) {
-                        knownHashes.put(entry.getAbsolutePath(), hash);
-                    }
-                }
-            }
-        });
-
         // Scan the directory (non-recursive) in background
         final int totalFiles = estimatedCount;
         final boolean usingProgressBar = showProgressBar;
         Task<List<MediaFile>> scanTask = new Task<>() {
             @Override
             protected List<MediaFile> call() {
-                return directoryScanService.scanDirectory(directory, knownHashes, (processed, total) -> {
+                return directoryScanService.scanDirectory(directory, (processed, total) -> {
                     int actualTotal = total > 0 ? total : totalFiles;
                     Platform.runLater(() -> {
                         if (usingProgressBar) {
@@ -913,7 +823,6 @@ public class MainController {
             }
 
             updateFileCount(files.size());
-            highlightDuplicates();
             // Re-apply current table sort order; fall back to name ascending if none set
             if (mediaTable.getSortOrder().isEmpty()) {
                 filenameColumn.setSortType(TableColumn.SortType.ASCENDING);
@@ -1047,20 +956,6 @@ public class MainController {
         logger.debug("Copied path to clipboard: {}", mediaFile.getAbsolutePath());
     }
 
-    private void copyHashToClipboard(MediaFile mediaFile) {
-        if (mediaFile == null || mediaFile.getSha1Hash() == null) {
-            return;
-        }
-
-        javafx.scene.input.Clipboard clipboard = javafx.scene.input.Clipboard.getSystemClipboard();
-        javafx.scene.input.ClipboardContent content = new javafx.scene.input.ClipboardContent();
-        content.putString(mediaFile.getSha1Hash());
-        clipboard.setContent(content);
-
-        statusLabel.setText("Hash copied to clipboard");
-        logger.debug("Copied hash to clipboard: {}", mediaFile.getSha1Hash());
-    }
-
     private void copyFilenameToClipboard(MediaFile mediaFile) {
         if (mediaFile == null || mediaFile.getFilename() == null) {
             return;
@@ -1162,12 +1057,7 @@ public class MainController {
         baseFolders.remove(path);
         saveSettings();
 
-        // Remove files from removed folder from the index
-        fileIndex.values().forEach(entries ->
-            entries.removeIf(entry -> entry.getDirectory().startsWith(path))
-        );
-        // Remove empty hash entries
-        fileIndex.entrySet().removeIf(entry -> entry.getValue().isEmpty());
+        scannedFiles.keySet().removeIf(dir -> dir.startsWith(path));
 
         // Clear current display if showing files from removed folder
         if (currentSelectedDirectory != null && currentSelectedDirectory.startsWith(path)) {
@@ -1391,7 +1281,6 @@ public class MainController {
         com.albumorganizer.model.MediaFile clipMediaFile = new com.albumorganizer.model.MediaFile(
             tempInput.getFileName().toString(),
             tempInput,
-            java.time.Instant.now(),
             com.albumorganizer.model.MediaType.IMAGE,
             tempInput.toFile().length()
         );
@@ -1586,62 +1475,43 @@ public class MainController {
         statusLabel.setText(message);
         logger.info("Added album folder: {}", newPath);
 
-        // Automatically run full scan with hash on the newly added folder
-        fullScanWithHashFolder(newPath);
-    }
-
-    private void fullScanWithHashFolder(Path path) {
-        // Scan only this specific folder, don't modify baseFolders
-        List<Path> foldersToScan = new ArrayList<>();
-        foldersToScan.add(path);
-        startScan(foldersToScan, true);
+        // Automatically scan newly added folder
+        quickScanFolder(newPath);
     }
 
     private void quickScanFolder(Path path) {
-        // Scan only this specific folder, don't modify baseFolders
         List<Path> foldersToScan = new ArrayList<>();
         foldersToScan.add(path);
-        startScan(foldersToScan, false);
+        startScan(foldersToScan);
     }
 
-    private void startScan(List<Path> foldersToScan, boolean isFullScanWithHash) {
+    private void startScan(List<Path> foldersToScan) {
         if (currentScanTask != null && currentScanTask.isRunning()) {
             logger.warn("Cannot start scan - another scan is already in progress");
             showWarning("Scan In Progress", "A scan is already in progress.");
             return;
         }
 
-        logger.info("Starting {} scan of {} folders", isFullScanWithHash ? "full scan with hash" : "quick", foldersToScan.size());
+        logger.info("Starting quick scan of {} folders", foldersToScan.size());
+        statusLabel.setText(String.format("Starting quick scan of %d folder(s)...", foldersToScan.size()));
 
-        // Update status bar at start
-        statusLabel.setText(String.format("Starting %s scan of %d folder(s)...",
-            isFullScanWithHash ? "full scan with hash" : "quick", foldersToScan.size()));
-
-        // Track which folders are being scanned
         currentlyScannedFolders = new ArrayList<>(foldersToScan);
+        currentScanTask = new ScanTask(scannerService, foldersToScan);
 
-        // Create scan task with current file index
-        currentScanTask = new ScanTask(scannerService, foldersToScan, isFullScanWithHash, fileIndex);
+        showProgressPanel();
 
-        // Show and configure scan panel
-        showProgressPanel(isFullScanWithHash);
-
-        // Feed file discovery events into the activity log (suppressed for post-organize rescans)
         if (preservedStatusMessage == null) {
             scannerService.setFileDiscoveryCallback(file -> {
-                String action = isFullScanWithHash ? "Hashed" : "Found";
                 String dir = file.getAbsolutePath().getParent().toString()
                     .replace(System.getProperty("user.home"), "~");
-                logProgress(action + ": " + file.getFilename() + " ; at " + dir);
+                logProgress("Found: " + file.getFilename() + " ; at " + dir);
             });
         } else {
             scannerService.setFileDiscoveryCallback(null);
         }
 
-        // Bind scan panel to task
         bindScanPanelToTask();
 
-        // Handle task completion
         currentScanTask.setOnSucceeded(this::onScanSucceeded);
         currentScanTask.setOnFailed(this::onScanFailed);
         currentScanTask.setOnCancelled(event -> {
@@ -1654,7 +1524,7 @@ public class MainController {
         thread.start();
     }
 
-    private void showProgressPanel(boolean isDeepScan) {
+    private void showProgressPanel() {
         stopProgressButton.setDisable(false);
         hideProgressButton.setDisable(false);
 
@@ -1809,51 +1679,14 @@ public class MainController {
             scannerService.setFileDiscoveryCallback(null);
             currentScanTask = null;
 
-            // Build a map of existing files to preserve their hashes
-            Map<Path, String> existingHashes = new HashMap<>();
+            // Remove old entries for scanned folders, then repopulate
             for (Path scannedFolder : currentlyScannedFolders) {
-                fileIndex.forEach((hash, entries) -> {
-                    for (FileIndexEntry entry : entries) {
-                        if (entry.getDirectory().startsWith(scannedFolder)) {
-                            Path fullPath = entry.getAbsolutePath();
-                            // Don't preserve NO_HASH_KEY entries - they're placeholders
-                            if (!hash.equals(NO_HASH_KEY)) {
-                                existingHashes.put(fullPath, hash);
-                            }
-                        }
-                    }
-                });
+                scannedFiles.keySet().removeIf(dir -> dir.startsWith(scannedFolder));
             }
-
-            // Remove old index entries from the scanned folders only
-            for (Path scannedFolder : currentlyScannedFolders) {
-                fileIndex.values().forEach(entries ->
-                    entries.removeIf(entry -> entry.getDirectory().startsWith(scannedFolder))
-                );
-            }
-            // Remove empty hash entries
-            fileIndex.entrySet().removeIf(entry -> entry.getValue().isEmpty());
-
-            // Add new scan results to index (hash -> list of (directory, filename, lastModified))
             for (MediaFile file : result.getAllFiles()) {
-                Path fullPath = file.getAbsolutePath();
-                String hash = file.getSha1Hash();
-
-                // If quick scan (no hash) but we have an existing hash for this file, use the existing hash
-                if ((hash == null || hash.isEmpty()) && existingHashes.containsKey(fullPath)) {
-                    hash = existingHashes.get(fullPath);
-                    logger.debug("Preserving existing hash for file: {}", file.getFilename());
-                }
-
-                // Use special key for files without hash (from quick scan with no prior hash)
-                String indexKey = (hash != null && !hash.isEmpty()) ? hash : NO_HASH_KEY;
-
-                Path directory = file.getAbsolutePath().getParent();
-                String filename = file.getFilename();
-                Instant lastModified = file.getLastModified(); // File modification date
-
-                fileIndex.computeIfAbsent(indexKey, k -> new ArrayList<>())
-                         .add(new FileIndexEntry(directory, filename, lastModified));
+                Path dir = file.getAbsolutePath().getParent();
+                scannedFiles.computeIfAbsent(dir, d -> new ArrayList<>())
+                            .add(file.getAbsolutePath());
             }
 
             // Debug: Log any corrupted files found
@@ -1914,40 +1747,6 @@ public class MainController {
                            exception.getMessage(),
                            exception);
         });
-    }
-
-    private void highlightDuplicates() {
-        // Find duplicate hashes from fileIndex (hashes with multiple files)
-        // Exclude NO_HASH_KEY since those files haven't been hashed yet
-        int duplicateHashCount = (int) fileIndex.entrySet().stream()
-            .filter(entry -> !entry.getKey().equals(NO_HASH_KEY))
-            .filter(entry -> entry.getValue().size() > 1)
-            .count();
-
-        logger.debug("Found {} unique duplicate hashes in global index", duplicateHashCount);
-
-        // Count duplicates in current view
-        int duplicateCount = (int) currentDisplayedFiles.stream()
-            .filter(f -> {
-                String hash = f.getSha1Hash();
-                return hash != null && !hash.isEmpty() && !hash.equals(NO_HASH_KEY)
-                    && fileIndex.containsKey(hash) && fileIndex.get(hash).size() > 1;
-            })
-            .count();
-
-        logger.debug("Should be highlighting {} duplicate files (out of {} total)", duplicateCount, currentDisplayedFiles.size());
-
-        // Force table to refresh all rows by triggering a layout update
-        mediaTable.refresh();
-
-        // Refresh thumbnail card borders to reflect duplicate status
-        if (thumbnailViewActive) {
-            for (var node : thumbnailPane.getChildren()) {
-                if (!(node instanceof javafx.scene.layout.VBox card)) continue;
-                if (!(card.getUserData() instanceof MediaFile mf)) continue;
-                applyThumbnailCardStyle(card, mf, mf == selectedThumbnailFile, false);
-            }
-        }
     }
 
     private void buildDirectoryTree() {
@@ -2122,10 +1921,8 @@ public class MainController {
     }
 
     private void buildSubtree(TreeItem<DirectoryNode> parentItem, Path basePath) {
-        // Get all unique directories from the file index under this base path
-        Set<Path> dirsWithFiles = fileIndex.values().stream()
-            .flatMap(List::stream)
-            .map(FileIndexEntry::getDirectory)
+        // Get all unique directories from scannedFiles under this base path
+        Set<Path> dirsWithFiles = scannedFiles.keySet().stream()
             .filter(dir -> dir.startsWith(basePath))
             .collect(Collectors.toSet());
 
@@ -2151,11 +1948,8 @@ public class MainController {
 
             // Create this directory node
             DirectoryNode node = new DirectoryNode(dir);
-            long fileCount = fileIndex.values().stream()
-                .flatMap(List::stream)
-                .filter(entry -> entry.getDirectory().equals(dir))
-                .count();
-            node.setMediaFileCount((int) fileCount);
+            List<Path> filesInDir = scannedFiles.getOrDefault(dir, List.of());
+            node.setMediaFileCount(filesInDir.size());
             node.setScanned(true);
 
             TreeItem<DirectoryNode> item = new TreeItem<>(node);
@@ -2175,11 +1969,8 @@ public class MainController {
         }
 
         // Update file count for album node
-        long albumFileCount = fileIndex.values().stream()
-            .flatMap(List::stream)
-            .filter(entry -> entry.getDirectory().equals(basePath))
-            .count();
-        parentItem.getValue().setMediaFileCount((int) albumFileCount);
+        List<Path> filesAtBase = scannedFiles.getOrDefault(basePath, List.of());
+        parentItem.getValue().setMediaFileCount(filesAtBase.size());
         parentItem.getValue().setScanned(true);
 
         // Calculate and set recursive counts for all nodes in the tree
@@ -2417,7 +2208,7 @@ public class MainController {
             if (!baseFolders.isEmpty()) {
                 saveSettings();
                 buildDirectoryTree();
-                Platform.runLater(() -> startScan(new ArrayList<>(baseFolders), true));
+                Platform.runLater(() -> startScan(new ArrayList<>(baseFolders)));
             }
         });
     }
@@ -2460,34 +2251,11 @@ public class MainController {
         }
     }
 
-    private void loadSnapshot() {
-        Map<String, List<FileIndexEntry>> snapshot = snapshotRepository.loadSnapshot();
-        if (!snapshot.isEmpty()) {
-            fileIndex.putAll(snapshot);
-            logger.debug("Loaded snapshot with {} hash entries", snapshot.size());
-
-            // Count total files from snapshot
-            int totalFiles = snapshot.values().stream()
-                .mapToInt(List::size)
-                .sum();
-            statusLabel.setText(String.format("Loaded snapshot: %d files indexed", totalFiles));
-        }
-    }
-
-    private void saveSnapshot() {
-        snapshotRepository.saveSnapshot(fileIndex);
-        logger.debug("Saved snapshot with {} hash entries", fileIndex.size());
-    }
-
     /**
-     * Public method to save snapshot on application shutdown.
-     * Called by AlbumOrganizerApp when window is closed.
+     * Public method called by AlbumOrganizerApp when window is closed.
      */
     public void saveSnapshotOnShutdown() {
-        logger.debug("saveSnapshotOnShutdown called");
-        saveSnapshot();
         thumbnailService.clearCache();
-        logger.debug("saveSnapshotOnShutdown completed");
     }
 
     /**
@@ -2511,10 +2279,10 @@ public class MainController {
         currentlyScannedFolders = new ArrayList<>(foldersToScan);
 
         // Create scan task with current file index
-        currentScanTask = new ScanTask(scannerService, foldersToScan, false, fileIndex); // false = quick scan
+        currentScanTask = new ScanTask(scannerService, foldersToScan);
 
         // Show and configure scan panel
-        showProgressPanel(false); // false = quick scan
+        showProgressPanel();
 
         // Feed file discovery events into the activity log
         scannerService.setFileDiscoveryCallback(file -> {
@@ -2532,65 +2300,20 @@ public class MainController {
             logger.debug("Startup quick scan completed: {}", result);
 
             Platform.runLater(() -> {
-                // Unbind first
-                // REMOVED: progressBar.progressProperty().unbind();
-
-                // Update scan panel with summary
-                // REMOVED: progressTitleLabel.setText("Startup Scan Complete");
-                StringBuilder summary = new StringBuilder();
-                summary.append(String.format("Total files found: %d\n", result.getAllFiles().size()));
-                summary.append(String.format("Scan duration: %s\n", result.getScanDuration()));
                 stopProgressButton.setDisable(true);
 
                 // Clear callback and task
                 scannerService.setFileDiscoveryCallback(null);
                 currentScanTask = null;
 
-                // Build a map of existing files to preserve their hashes
-                Map<Path, String> existingHashes = new HashMap<>();
+                // Remove old entries for scanned folders, then repopulate
                 for (Path scannedFolder : currentlyScannedFolders) {
-                    fileIndex.forEach((hash, entries) -> {
-                        for (FileIndexEntry entry : entries) {
-                            if (entry.getDirectory().startsWith(scannedFolder)) {
-                                Path fullPath = entry.getAbsolutePath();
-                                // Don't preserve NO_HASH_KEY entries - they're placeholders
-                                if (!hash.equals(NO_HASH_KEY)) {
-                                    existingHashes.put(fullPath, hash);
-                                }
-                            }
-                        }
-                    });
+                    scannedFiles.keySet().removeIf(dir -> dir.startsWith(scannedFolder));
                 }
-
-                // Remove old index entries from scanned folders
-                for (Path scannedFolder : currentlyScannedFolders) {
-                    fileIndex.values().forEach(entries ->
-                        entries.removeIf(entry -> entry.getDirectory().startsWith(scannedFolder))
-                    );
-                }
-                // Remove empty hash entries
-                fileIndex.entrySet().removeIf(entry -> entry.getValue().isEmpty());
-
-                // Add new scan results to index
                 for (MediaFile file : result.getAllFiles()) {
-                    Path fullPath = file.getAbsolutePath();
-                    String hash = file.getSha1Hash();
-
-                    // If quick scan (no hash) but we have an existing hash for this file, use the existing hash
-                    if ((hash == null || hash.isEmpty()) && existingHashes.containsKey(fullPath)) {
-                        hash = existingHashes.get(fullPath);
-                        logger.debug("Preserving existing hash for file: {}", file.getFilename());
-                    }
-
-                    // Use special key for files without hash (from quick scan with no prior hash)
-                    String indexKey = (hash != null && !hash.isEmpty()) ? hash : NO_HASH_KEY;
-
-                    Path directory = file.getAbsolutePath().getParent();
-                    String filename = file.getFilename();
-                    Instant lastModified = file.getLastModified();
-
-                    fileIndex.computeIfAbsent(indexKey, k -> new ArrayList<>())
-                             .add(new FileIndexEntry(directory, filename, lastModified));
+                    Path dir = file.getAbsolutePath().getParent();
+                    scannedFiles.computeIfAbsent(dir, d -> new ArrayList<>())
+                                .add(file.getAbsolutePath());
                 }
 
                 buildDirectoryTree();
@@ -2606,10 +2329,6 @@ public class MainController {
             Throwable exception = event.getSource().getException();
             logger.error("Startup quick scan failed", exception);
             Platform.runLater(() -> {
-                // Unbind first
-                // REMOVED: progressBar.progressProperty().unbind();
-
-                // REMOVED: progressTitleLabel.setText("Startup Scan Failed");
                 stopProgressButton.setDisable(true);
 
                 // Clear callback and task
@@ -2633,11 +2352,6 @@ public class MainController {
     @FXML
     private void onExit() {
         logger.info("Application exit requested from menu");
-
-        // Save snapshot before shutting down
-        logger.debug("Saving snapshot before exit");
-        saveSnapshot();
-        logger.debug("Snapshot save completed");
 
         // Shutdown executor
         if (thumbnailLoadExecutor != null) {
@@ -2904,11 +2618,6 @@ public class MainController {
 
     private void applyThumbnailCardStyle(javafx.scene.layout.VBox card, MediaFile mf,
                                           boolean selected, boolean hovered) {
-        boolean isDuplicate = mf != null && mf.getSha1Hash() != null
-            && !mf.getSha1Hash().isEmpty() && !mf.getSha1Hash().equals(NO_HASH_KEY)
-            && fileIndex.containsKey(mf.getSha1Hash())
-            && fileIndex.get(mf.getSha1Hash()).size() > 1;
-
         if (selected) {
             card.setStyle("-fx-padding: 10; -fx-background-color: #cce5ff;"
                 + " -fx-border-color: #0078d7; -fx-border-width: 2;"
@@ -2917,10 +2626,6 @@ public class MainController {
             card.setStyle("-fx-padding: 10; -fx-background-color: #f0f0f0;"
                 + " -fx-border-color: #0078d7; -fx-border-width: 2;"
                 + " -fx-border-radius: 5; -fx-background-radius: 5; -fx-cursor: hand;");
-        } else if (isDuplicate) {
-            card.setStyle("-fx-padding: 10; -fx-background-color: white;"
-                + " -fx-border-color: #e6b800; -fx-border-width: 2;"
-                + " -fx-border-radius: 5; -fx-background-radius: 5;");
         } else {
             card.setStyle("-fx-padding: 10; -fx-background-color: white;"
                 + " -fx-border-color: #ddd; -fx-border-radius: 5; -fx-background-radius: 5;");
@@ -3025,9 +2730,6 @@ public class MainController {
         MenuItem copyImageItem = new MenuItem("Copy Image");
         copyImageItem.setOnAction(e -> copyImageToClipboard(mediaFile));
 
-        MenuItem removeOtherDuplicatesItem = new MenuItem("Remove Other Duplicates");
-        removeOtherDuplicatesItem.setOnAction(e -> removeOtherDuplicates(mediaFile));
-
         MenuItem deleteFileThumbItem = new MenuItem("Delete File");
         deleteFileThumbItem.setOnAction(e -> deleteFile(mediaFile));
 
@@ -3042,8 +2744,6 @@ public class MainController {
 
         // Enable/disable based on context
         contextMenu.setOnShowing(event -> {
-            boolean hasDupes = hasDuplicates(mediaFile);
-            removeOtherDuplicatesItem.setDisable(!hasDupes);
             enhanceWithAiItem.setDisable(imageEnhancementService.getConfiguredProviders().isEmpty()
                 || (mediaFile.getType() != MediaType.IMAGE
                     && !(mediaFile.getType() == MediaType.VIDEO
@@ -3067,7 +2767,6 @@ public class MainController {
             copyFilenameItem,
             copyImageItem,
             new SeparatorMenuItem(),
-            removeOtherDuplicatesItem,
             deleteFileThumbItem,
             permanentDeleteThumbItem,
             restoreFromBinThumbItem,
@@ -3286,350 +2985,14 @@ public class MainController {
         alert.showAndWait();
     }
 
-    /**
-     * Checks if a MediaFile has duplicates (other files with same hash) in the global index.
-     */
-    private boolean hasDuplicates(MediaFile mediaFile) {
-        if (mediaFile == null || mediaFile.getSha1Hash() == null) {
-            return false;
-        }
-
-        List<FileIndexEntry> entries = fileIndex.get(mediaFile.getSha1Hash());
-        return entries != null && entries.size() > 1;
-    }
-
-    /**
-     * Removes all other duplicate files (keeps the selected one, moves others to recycle bin).
-     */
-    private void removeOtherDuplicates(MediaFile keepFile) {
-        if (keepFile == null || keepFile.getSha1Hash() == null) {
-            return;
-        }
-
-        if (settings.getRecycleBinFolder() == null) {
-            showWarning("Recycle-Bin Not Configured",
-                "Please configure a Recycle-Bin folder first via File > Add Recycle-Bin Folder.");
-            return;
-        }
-
-        // Find all duplicates from the index
-        List<FileIndexEntry> entries = fileIndex.get(keepFile.getSha1Hash());
-        if (entries == null || entries.size() <= 1) {
-            showWarning("No Duplicates", "This file has no duplicates to remove.");
-            return;
-        }
-
-        // Get paths of all duplicates except the one to keep
-        Path keepPath = keepFile.getAbsolutePath();
-        List<Path> duplicatePaths = entries.stream()
-            .map(FileIndexEntry::getAbsolutePath)
-            .filter(path -> !path.equals(keepPath))
-            .collect(Collectors.toList());
-
-        if (duplicatePaths.isEmpty()) {
-            showWarning("No Duplicates", "This file has no duplicates to remove.");
-            return;
-        }
-
-        // Create custom confirmation dialog
-        Alert confirmAlert = new Alert(Alert.AlertType.CONFIRMATION);
-        confirmAlert.setTitle("Remove Duplicates");
-        confirmAlert.setHeaderText("Move Other duplicates to the recycle-bin");
-
-        // Make dialog resizable
-        confirmAlert.setResizable(true);
-
-        // Calculate font scale
-        double fontScale = Math.pow(2.0, settings.getFontSizeFactor() / 4.0);
-
-        // Build content with styled text
-        VBox content = new VBox(10);
-        content.setStyle(String.format("-fx-padding: 10; -fx-font-size: %.2fem;", fontScale));
-
-        // Label explaining the action
-        Label explanation = new Label("The following file will be KEPT:");
-        explanation.setStyle("-fx-font-weight: bold;");
-        content.getChildren().add(explanation);
-
-        // Keep file (dark green and bold)
-        Label keepLabel = new Label("✓ " + keepFile.getAbsolutePath().toString());
-        keepLabel.setStyle("-fx-text-fill: #006400; -fx-font-weight: bold; -fx-padding: 5;");
-        keepLabel.setWrapText(true);
-        keepLabel.setMaxWidth(500 * fontScale);
-        content.getChildren().add(keepLabel);
-
-        // Separator
-        content.getChildren().add(new Separator());
-
-        // Label for files to delete
-        Label deleteLabel = new Label("Select files to MOVE TO RECYCLE-BIN (uncheck to keep):");
-        deleteLabel.setStyle("-fx-font-weight: bold;");
-        content.getChildren().add(deleteLabel);
-
-        // List of checkboxes for files to delete
-        VBox deleteList = new VBox(5);
-        java.util.Map<Path, CheckBox> checkBoxMap = new java.util.LinkedHashMap<>();
-
-        for (Path duplicatePath : duplicatePaths) {
-            CheckBox checkBox = new CheckBox(duplicatePath.toString());
-            checkBox.setSelected(true); // Default: all checked
-            checkBox.setStyle("-fx-text-fill: #8B0000; -fx-padding: 5;");
-            checkBox.setWrapText(true);
-            checkBox.setMaxWidth(500 * fontScale);
-            checkBoxMap.put(duplicatePath, checkBox);
-            deleteList.getChildren().add(checkBox);
-        }
-
-        // Wrap in ScrollPane if many files
-        if (duplicatePaths.size() > 10) {
-            ScrollPane scrollPane = new ScrollPane(deleteList);
-            scrollPane.setFitToWidth(true);
-            scrollPane.setPrefHeight(300 * fontScale);
-            scrollPane.setStyle("-fx-background: white; -fx-border-color: #cccccc;");
-            content.getChildren().add(scrollPane);
-        } else {
-            content.getChildren().add(deleteList);
-        }
-
-        confirmAlert.getDialogPane().setContent(content);
-
-        // Set minimum size for dialog based on font scale
-        confirmAlert.getDialogPane().setMinWidth(600 * fontScale);
-        confirmAlert.getDialogPane().setPrefWidth(600 * fontScale);
-
-        // Custom buttons: Cancel (default) and Delete
-        ButtonType deleteButtonType = new ButtonType("Move to Recycle-Bin", ButtonBar.ButtonData.OK_DONE);
-        ButtonType cancelButtonType = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
-        confirmAlert.getButtonTypes().setAll(cancelButtonType, deleteButtonType);
-
-        // Set Cancel as default button
-        Button cancelButton = (Button) confirmAlert.getDialogPane().lookupButton(cancelButtonType);
-        cancelButton.setDefaultButton(true);
-        Button deleteButton = (Button) confirmAlert.getDialogPane().lookupButton(deleteButtonType);
-        deleteButton.setDefaultButton(false);
-
-        Optional<ButtonType> result = confirmAlert.showAndWait();
-        if (result.isEmpty() || result.get() != deleteButtonType) {
-            return;
-        }
-
-        // Get only the checked files to delete
-        List<Path> filesToDelete = checkBoxMap.entrySet().stream()
-            .filter(entry -> entry.getValue().isSelected())
-            .map(java.util.Map.Entry::getKey)
-            .collect(Collectors.toList());
-
-        if (filesToDelete.isEmpty()) {
-            showWarning("No Files Selected", "No files were selected for deletion.");
-            return;
-        }
-
-        // Move selected duplicates to recycle bin
-        int successCount = 0;
-        int failCount = 0;
-        List<String> failedFiles = new ArrayList<>();
-        String hash = keepFile.getSha1Hash();
-        Path binFolder = settings.getRecycleBinFolder();
-
-        for (Path duplicatePath : filesToDelete) {
-            boolean success = moveToBin(duplicatePath, binFolder);
-            if (success) {
-                successCount++;
-                // Remove from fileIndex exhaustively and save snapshot
-                removeFileFromIndex(duplicatePath);
-
-                // Remove from currentDisplayedFiles using case-insensitive normalized comparison
-                currentDisplayedFiles.removeIf(file -> {
-                    Path fileAbs = file.getAbsolutePath().normalize().toAbsolutePath();
-                    Path dupAbs = duplicatePath.normalize().toAbsolutePath();
-                    return fileAbs.toString().equalsIgnoreCase(dupAbs.toString());
-                });
-            } else {
-                failCount++;
-                failedFiles.add(duplicatePath.getFileName().toString());
-            }
-        }
-
-        // Update UI
-        refreshCurrentView();
-        updateFileCount(currentDisplayedFiles.size());
-        highlightDuplicates();
-        buildDirectoryTree();
-
-        // Show result
-        if (failCount == 0) {
-            statusLabel.setText("Moved " + successCount + " duplicate file(s) to recycle bin");
-            logger.info("Successfully moved {} duplicates of: {} to bin", successCount, keepFile.getFilename());
-        } else {
-            String message = String.format(
-                "Moved %d file(s) to recycle bin.\n\nFailed to move %d file(s):\n%s",
-                successCount,
-                failCount,
-                String.join("\n", failedFiles.stream().limit(10).collect(Collectors.toList()))
-            );
-            showWarning("Partial Success", message);
-            logger.warn("Moved {} duplicates, failed to move {}", successCount, failCount);
-        }
-    }
-
-    /** Returns true if the subtree rooted at folderPath contains any file that has duplicates outside the subtree. */
-    private boolean subtreeHasExternalDuplicates(Path folderPath) {
-        for (Map.Entry<String, List<FileIndexEntry>> entry : fileIndex.entrySet()) {
-            if (entry.getKey().equals(NO_HASH_KEY)) continue;
-            List<FileIndexEntry> entries = entry.getValue();
-            if (entries.size() <= 1) continue;
-            boolean hasInside  = entries.stream().anyMatch(e -> e.getDirectory().startsWith(folderPath));
-            boolean hasOutside = entries.stream().anyMatch(e -> !e.getDirectory().startsWith(folderPath));
-            if (hasInside && hasOutside) return true;
-        }
-        return false;
-    }
-
-    private void removeOtherDuplicatesInSubtree(Path folderPath) {
-        Path binFolder = settings.getRecycleBinFolder();
-        if (binFolder == null) {
-            showWarning("Recycle-Bin Not Configured",
-                "Please configure a Recycle-Bin folder first via File > Add Recycle-Bin Folder.");
-            return;
-        }
-
-        // Collect: for each hash that has copies both inside and outside, gather the outside ones
-        Map<String, List<Path>> toRemoveByHash = new java.util.LinkedHashMap<>();
-        for (Map.Entry<String, List<FileIndexEntry>> entry : fileIndex.entrySet()) {
-            if (entry.getKey().equals(NO_HASH_KEY)) continue;
-            List<FileIndexEntry> entries = entry.getValue();
-            if (entries.size() <= 1) continue;
-            boolean hasInside = entries.stream().anyMatch(e -> e.getDirectory().startsWith(folderPath));
-            if (!hasInside) continue;
-            List<Path> outside = entries.stream()
-                .filter(e -> !e.getDirectory().startsWith(folderPath))
-                .map(FileIndexEntry::getAbsolutePath)
-                .collect(Collectors.toList());
-            if (!outside.isEmpty()) toRemoveByHash.put(entry.getKey(), outside);
-        }
-
-        int totalToRemove = toRemoveByHash.values().stream().mapToInt(List::size).sum();
-        if (totalToRemove == 0) {
-            showWarning("No External Duplicates",
-                "No duplicates outside this folder were found.");
-            return;
-        }
-
-        String folderName = folderPath.getFileName() != null ? folderPath.getFileName().toString() : folderPath.toString();
-        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
-        confirm.setTitle("Remove Other Duplicates");
-        confirm.setHeaderText("Move external duplicates to Recycle-Bin?");
-        confirm.setContentText(String.format(
-            "Found %d file(s) with duplicates inside \"%s\".\n"
-            + "%d duplicate(s) outside the folder will be moved to the recycle bin.\n\n"
-            + "Files inside the folder are kept. Only external copies are removed.",
-            toRemoveByHash.size(), folderName, totalToRemove));
-        ButtonType goBtn = new ButtonType("Move to Recycle-Bin", ButtonBar.ButtonData.OK_DONE);
-        ButtonType cancelBtn = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
-        confirm.getButtonTypes().setAll(cancelBtn, goBtn);
-        ((Button) confirm.getDialogPane().lookupButton(cancelBtn)).setDefaultButton(true);
-        ((Button) confirm.getDialogPane().lookupButton(goBtn)).setDefaultButton(false);
-        Optional<ButtonType> result = confirm.showAndWait();
-        if (result.isEmpty() || result.get() != goBtn) return;
-
-        // Run the operation in the background
-        progressLogList.getItems().clear();
-        progressBar.progressProperty().unbind();
-        progressBar.setProgress(0);
-        progressBar.setVisible(true);
-        progressBar.setManaged(true);
-        progressPanel.setVisible(true);
-        progressPanel.setManaged(true);
-        showProgressPanelMenuItem.setSelected(true);
-        stopProgressButton.setDisable(true);
-
-        Task<int[]> task = new Task<>() {
-            @Override
-            protected int[] call() {
-                int moved = 0, failed = 0, skipped = 0;
-                int total = totalToRemove;
-                int processed = 0;
-                for (Map.Entry<String, List<Path>> entry : toRemoveByHash.entrySet()) {
-                    for (Path p : entry.getValue()) {
-                        if (isCancelled()) break;
-                        if (!Files.exists(p)) {
-                            skipped++;
-                        } else if (moveToBin(p, binFolder)) {
-                            moved++;
-                            final String name = p.getFileName().toString();
-                            final int m = moved;
-                            Platform.runLater(() -> {
-                                logProgress("✓ Moved: " + name + " (" + m + " so far)");
-                                final Path removed = p;
-                                removeFileFromIndex(removed);
-                                currentDisplayedFiles.removeIf(f -> {
-                                    Path fAbs = f.getAbsolutePath().normalize().toAbsolutePath();
-                                    Path remAbs = removed.normalize().toAbsolutePath();
-                                    return fAbs.toString().equalsIgnoreCase(remAbs.toString());
-                                });
-                            });
-                        } else {
-                            failed++;
-                            final String name = p.getFileName().toString();
-                            Platform.runLater(() -> logProgress("✗ Failed: " + name));
-                        }
-                        processed++;
-                        updateProgress(processed, total);
-                    }
-                    if (isCancelled()) break;
-                }
-                return new int[]{moved, failed, skipped};
-            }
-        };
-
-        progressBar.progressProperty().bind(task.progressProperty());
-
-        task.setOnSucceeded(ev -> {
-            int[] stats = task.getValue();
-            progressBar.progressProperty().unbind();
-            progressBar.setProgress(1.0);
-            stopProgressButton.setDisable(true);
-
-            // Refresh UI
-            refreshCurrentView();
-            updateFileCount(currentDisplayedFiles.size());
-            highlightDuplicates();
-            buildDirectoryTree();
-
-            String summary = String.format(
-                "Done — moved %d, failed %d, skipped %d (already gone)",
-                stats[0], stats[1], stats[2]);
-            logProgress(summary);
-            statusLabel.setText(summary);
-            logger.info("removeOtherDuplicatesInSubtree({}): {}", folderPath, summary);
-        });
-
-        task.setOnFailed(ev -> {
-            progressBar.progressProperty().unbind();
-            stopProgressButton.setDisable(true);
-            logProgress("Operation failed: " + task.getException().getMessage());
-            logger.error("removeOtherDuplicatesInSubtree failed", task.getException());
-        });
-
-        currentOrganizeTask = task;
-        stopProgressButton.setDisable(false);
-        logProgress("Starting: remove external duplicates for \"" + folderName + "\" (" + totalToRemove + " files)...");
-        new Thread(task, "remove-duplicates-subtree").start();
-    }
-
     private void removeFileFromIndex(Path filePath) {
         if (filePath == null) return;
         Path normalizedPath = filePath.normalize().toAbsolutePath();
-        String pathStr = normalizedPath.toString();
-
-        fileIndex.values().forEach(entries ->
-            entries.removeIf(entry -> {
-                Path entryPath = entry.getAbsolutePath().normalize().toAbsolutePath();
-                return entryPath.toString().equalsIgnoreCase(pathStr);
-            })
+        scannedFiles.values().forEach(paths ->
+            paths.removeIf(p -> p.normalize().toAbsolutePath().toString()
+                .equalsIgnoreCase(normalizedPath.toString()))
         );
-        fileIndex.entrySet().removeIf(entry -> entry.getValue().isEmpty());
-        snapshotRepository.saveSnapshot(fileIndex);
+        scannedFiles.entrySet().removeIf(entry -> entry.getValue().isEmpty());
     }
 
     private void deleteFile(MediaFile mediaFile) {
@@ -3670,7 +3033,6 @@ public class MainController {
 
             refreshCurrentView();
             updateFileCount(currentDisplayedFiles.size());
-            highlightDuplicates();
             buildDirectoryTree();
             // Scan the bin folder so the new file appears in the tree and index
             quickScanFolder(binFolder);
@@ -3737,7 +3099,6 @@ public class MainController {
             currentDisplayedFiles.remove(mediaFile);
             refreshCurrentView();
             updateFileCount(currentDisplayedFiles.size());
-            highlightDuplicates();
             // Scan both the bin folder (to reflect removal) and the original folder (to reflect addition)
             quickScanFolder(binFolder);
             quickScanFolder(originalPath.getParent());
@@ -3830,14 +3191,11 @@ public class MainController {
 
                 // Rescan the target folder to update the file index and show new file
                 Path targetFolder = settings.getTargetFolder();
-                if (targetFolder != null && baseFolders.contains(targetFolder)) {
-                    logger.debug("Rescanning target folder to update index: {}", targetFolder);
-                    fullScanWithHashFolder(targetFolder);
-                } else if (targetFolder != null) {
-                    logger.debug("Target folder is not in base folders, adding it: {}", targetFolder);
-                    // Target folder is not an album folder - add it temporarily for scanning
+                if (targetFolder != null && !baseFolders.contains(targetFolder)) {
                     baseFolders.add(targetFolder);
-                    fullScanWithHashFolder(targetFolder);
+                }
+                if (targetFolder != null) {
+                    quickScanFolder(targetFolder);
                 }
 
                 // Don't show info dialog - just status message
@@ -3950,15 +3308,13 @@ public class MainController {
                         List.of("Failed to create report: " + e.getMessage()), List.of());
                 }
 
-                // Collect files to organize from fileIndex (no disk walk needed)
+                // Collect files to organize from scannedFiles
                 List<MediaFile> filesToOrganize = new ArrayList<>();
                 try {
-                    updateMessage("Collecting files from index...");
+                    updateMessage("Collecting files...");
 
-                    // Extract all unique directories under rootPath from the fileIndex
-                    Set<Path> indexedDirs = fileIndex.values().stream()
-                        .flatMap(List::stream)
-                        .map(FileIndexEntry::getDirectory)
+                    // Extract all unique directories under rootPath from scannedFiles
+                    Set<Path> indexedDirs = scannedFiles.keySet().stream()
                         .filter(dir -> dir.startsWith(rootPath))
                         .collect(java.util.stream.Collectors.toCollection(java.util.TreeSet::new));
 
@@ -3970,19 +3326,7 @@ public class MainController {
 
                         reportWriter.logDirectoryStart(dir);
 
-                        // Build hash lookup for this directory from fileIndex
-                        Map<Path, String> dirKnownHashes = new HashMap<>();
-                        fileIndex.forEach((hash, entries) -> {
-                            if (!hash.equals(NO_HASH_KEY)) {
-                                for (FileIndexEntry entry : entries) {
-                                    if (entry.getDirectory().equals(dir)) {
-                                        dirKnownHashes.put(entry.getAbsolutePath(), hash);
-                                    }
-                                }
-                            }
-                        });
-
-                        List<MediaFile> filesInDir = directoryScanService.scanDirectory(dir, dirKnownHashes);
+                        List<MediaFile> filesInDir = directoryScanService.scanDirectory(dir);
                         filesToOrganize.addAll(filesInDir);
                     }
                 } catch (Exception e) {
@@ -4070,7 +3414,7 @@ public class MainController {
         statusLabel.setText("Starting organization of files...");
 
         // Show scan panel for progress, with progress bar visible
-        showProgressPanel(false);
+        showProgressPanel();
         progressBar.setVisible(true);
         progressBar.setManaged(true);
         progressBar.progressProperty().bind(organizeTask.progressProperty());;
@@ -4083,7 +3427,7 @@ public class MainController {
                 progressBar.setVisible(false);
                 progressBar.setManaged(false);
 
-                // Remove successfully organized files from fileIndex and currentDisplayedFiles
+                // Remove successfully organized files from scannedFiles and currentDisplayedFiles
                 if (result.organizedPaths != null) {
                     for (Path organizedPath : result.organizedPaths) {
                         removeFileFromIndex(organizedPath);
@@ -4097,7 +3441,6 @@ public class MainController {
 
                 refreshCurrentView();
                 updateFileCount(currentDisplayedFiles.size());
-                highlightDuplicates();
                 buildDirectoryTree();
 
                 String summary = String.format("Organize Complete: %d processed, %d succeeded, %d skipped, %d failed",
@@ -4124,10 +3467,9 @@ public class MainController {
 
                 // Rescan target folder to update tree
                 Path targetFolder = settings.getTargetFolder();
-                if (targetFolder != null && baseFolders.contains(targetFolder)) {
-                    fullScanWithHashFolder(targetFolder);
+                if (targetFolder != null) {
+                    quickScanFolder(targetFolder);
                 } else {
-                    // No automatic rescan, clear preserved message
                     preservedStatusMessage = null;
                 }
 

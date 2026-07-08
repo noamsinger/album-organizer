@@ -87,25 +87,6 @@
     -fx-fill: white !important;
 }
 
-/* Duplicate files - yellow background */
-.table-row-cell.duplicate {
-    -fx-background-color: #fff9c4 !important;
-}
-
-/* Duplicate selected - dark blue background with strong yellow text */
-.table-row-cell.duplicate:selected {
-    -fx-background-color: #00008B !important; /* dark blue */
-    -fx-text-fill: #FFD700 !important; /* strong yellow (gold) */
-}
-
-.table-row-cell.duplicate:selected .table-cell {
-    -fx-text-fill: #FFD700 !important;
-}
-
-.table-row-cell.duplicate:selected .table-cell .text {
-    -fx-fill: #FFD700 !important;
-}
-
 /* Corrupted files - pale red background with black text */
 .table-row-cell.corrupted {
     -fx-background-color: #ffcccc !important; /* pale red */

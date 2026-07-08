@@ -101,7 +101,6 @@
                         <TableColumn fx:id="sizeColumn" text="Size" prefWidth="100"/>
                         <TableColumn fx:id="resolutionColumn" text="Resolution" prefWidth="120"/>
                         <TableColumn fx:id="locationColumn" text="Location" prefWidth="250"/>
-                        <TableColumn fx:id="hashColumn" text="Hash" prefWidth="150"/>
                     </columns>
                 </TableView>
 

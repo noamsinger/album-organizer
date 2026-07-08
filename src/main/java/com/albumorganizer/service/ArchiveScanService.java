@@ -17,7 +17,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.List;
@@ -52,8 +51,7 @@ public class ArchiveScanService {
                 Path entryPath = Path.of(entry.getName());
                 if (!FileTypeDetector.isMediaFile(entryPath)) continue;
 
-                MediaFile mf = buildMediaFile(archivePath, entry.getName(), entry.getSize(),
-                    entry.getLastModifiedDate() != null ? entry.getLastModifiedDate().toInstant() : null);
+                MediaFile mf = buildMediaFile(archivePath, entry.getName(), entry.getSize());
                 result.add(mf);
             }
         }
@@ -71,8 +69,7 @@ public class ArchiveScanService {
                 Path entryPath = Path.of(entry.getName());
                 if (!FileTypeDetector.isMediaFile(entryPath)) continue;
 
-                MediaFile mf = buildMediaFile(archivePath, entry.getName(), entry.getSize(),
-                    entry.getLastModifiedDate() != null ? entry.getLastModifiedDate().toInstant() : null);
+                MediaFile mf = buildMediaFile(archivePath, entry.getName(), entry.getSize());
                 result.add(mf);
             }
         } catch (org.apache.commons.compress.archivers.ArchiveException e) {
@@ -82,7 +79,7 @@ public class ArchiveScanService {
         return result;
     }
 
-    private MediaFile buildMediaFile(Path archivePath, String entryName, long size, Instant lastModified) {
+    private MediaFile buildMediaFile(Path archivePath, String entryName, long size) {
         // Virtual path: archive#entryName  (used as unique identifier)
         String virtualPathStr = archivePath.toString() + "#" + entryName;
         Path virtualPath = Path.of(virtualPathStr);
@@ -92,7 +89,6 @@ public class ArchiveScanService {
         mf.setAbsolutePath(virtualPath);
         mf.setFilename(entryFilename != null ? entryFilename.toString() : entryName);
         mf.setSizeBytes(size < 0 ? 0 : size);
-        mf.setLastModified(lastModified != null ? lastModified : Instant.EPOCH);
 
         String ext = getExtension(Path.of(entryName));
         if (Constants.IMAGE_EXTENSIONS.contains(ext)) {
