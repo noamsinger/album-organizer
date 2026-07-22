@@ -180,6 +180,7 @@
                             <mainClass>com.albumorganizer.Launcher</mainClass>
                             <options>
                                 <option>-Dapple.awt.application.name=AlbumOrganizer</option>
+                                <option>-Dapple.laf.useScreenMenuBar=true</option>
                                 <!-- Prevent the plugin extracting wrong-arch natives from the
                                      unclassified jar; the classified (mac-aarch64) jar on the
                                      module path already contains the correct dylibs. -->

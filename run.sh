@@ -14,5 +14,7 @@ FX_MODS="${FX_MODS#:}"
 java \
   --module-path "$FX_MODS" \
   --add-modules=javafx.controls,javafx.fxml,javafx.swing \
+  -Dapple.awt.application.name=AlbumOrganizer \
+  -Dapple.laf.useScreenMenuBar=true \
   -cp "target/album-organizer-1.0.0.jar:$(ls target/lib/*.jar | tr '\n' ':')" \
   com.albumorganizer.AlbumOrganizerApp

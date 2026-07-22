@@ -18,14 +18,13 @@ import java.nio.file.Paths;
 public class RealEsrganProvider implements EnhancementProvider {
 
     private static final Logger logger = LoggerFactory.getLogger(RealEsrganProvider.class);
-    private static final String DEFAULT_MODEL_DIR =
-        System.getProperty("user.home") + "/.config/album-organizer/models/";
+    private static final String DEFAULT_MODEL_PATH =
+        com.albumorganizer.util.AppDirs.modelsDir().resolve("RealESRGAN_x4plus.onnx").toString();
 
     private final String modelPath;
 
     public RealEsrganProvider(String modelPath) {
-        this.modelPath = modelPath != null && !modelPath.isBlank() ? modelPath
-            : DEFAULT_MODEL_DIR + "RealESRGAN_x4plus.onnx";
+        this.modelPath = modelPath != null && !modelPath.isBlank() ? modelPath : DEFAULT_MODEL_PATH;
     }
 
     @Override

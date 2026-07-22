@@ -19,13 +19,13 @@ import java.util.Map;
 
 /**
  * Persists the mapping of files in the recycle-bin folder to their original paths.
- * Backed by ~/.config/album-organizer/recycle-bin-index.json.
+ * Backed by the OS-appropriate config dir: recycle-bin-index.json.
  */
 public class RecycleBinRepository {
 
     private static final Logger logger = LoggerFactory.getLogger(RecycleBinRepository.class);
-    private static final Path INDEX_FILE = Paths.get(
-        System.getProperty("user.home"), ".config", "album-organizer", "recycle-bin-index.json");
+    private static final Path INDEX_FILE = com.albumorganizer.util.AppDirs.configDir()
+        .resolve("recycle-bin-index.json");
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Type MAP_TYPE = new TypeToken<LinkedHashMap<String, String>>() {}.getType();
 
@@ -33,7 +33,22 @@ public class RecycleBinRepository {
     private final Map<String, String> index = new LinkedHashMap<>();
 
     public RecycleBinRepository() {
+        migrateFromLegacy();
         load();
+    }
+
+    private static void migrateFromLegacy() {
+        if (Files.exists(INDEX_FILE)) return;
+        Path oldFile = Paths.get(System.getProperty("user.home"),
+            ".config", "album-organizer", "recycle-bin-index.json");
+        if (!Files.exists(oldFile) || oldFile.equals(INDEX_FILE)) return;
+        try {
+            Files.createDirectories(INDEX_FILE.getParent());
+            Files.copy(oldFile, INDEX_FILE, StandardCopyOption.REPLACE_EXISTING);
+            logger.info("Migrated recycle-bin index from {} to {}", oldFile, INDEX_FILE);
+        } catch (IOException e) {
+            logger.warn("Could not migrate recycle-bin index: {}", e.getMessage());
+        }
     }
 
     public void add(Path binPath, Path originalPath) {

@@ -3,6 +3,7 @@ package com.albumorganizer.repository;
 import com.albumorganizer.model.AppUsage;
 import com.albumorganizer.service.enhancement.ImageEnhancementService;
 import com.albumorganizer.service.enhancement.NamedPrompt;
+import com.albumorganizer.util.AppDirs;
 import com.google.gson.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,8 +23,7 @@ public class UsageRepository {
 
     private static final Logger logger = LoggerFactory.getLogger(UsageRepository.class);
 
-    private static final Path FILE = Paths.get(
-        System.getProperty("user.home"), ".config", "album-organizer", "album-organizer-usage.json");
+    private static final Path FILE = AppDirs.configDir().resolve("album-organizer-usage.json");
 
     private static final Gson GSON = new GsonBuilder()
         .setPrettyPrinting()
@@ -47,6 +47,7 @@ public class UsageRepository {
     public UsageRepository() {
         try {
             Files.createDirectories(FILE.getParent());
+            migrateFromLegacy(FILE);
         } catch (IOException e) {
             logger.error("Failed to create config directory", e);
         }
@@ -128,6 +129,19 @@ public class UsageRepository {
             logger.debug("Saved usage to {}", FILE);
         } catch (IOException e) {
             logger.error("Failed to save usage", e);
+        }
+    }
+
+    private static void migrateFromLegacy(Path newFile) {
+        if (Files.exists(newFile)) return;
+        Path oldFile = Paths.get(System.getProperty("user.home"),
+            ".config", "album-organizer", "album-organizer-usage.json");
+        if (!Files.exists(oldFile) || oldFile.equals(newFile)) return;
+        try {
+            Files.copy(oldFile, newFile, StandardCopyOption.REPLACE_EXISTING);
+            logger.info("Migrated usage from {} to {}", oldFile, newFile);
+        } catch (IOException e) {
+            logger.warn("Could not migrate usage file: {}", e.getMessage());
         }
     }
 

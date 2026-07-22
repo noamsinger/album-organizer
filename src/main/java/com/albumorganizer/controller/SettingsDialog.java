@@ -309,8 +309,8 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
             "Fast, high-quality image upscaling using the Real-ESRGAN neural network model. " +
             "No prompts — pure upscaling. Runs on CPU via Java ONNX Runtime, no GPU required. " +
             "Download the ONNX model file once and point to it below.",
-            "How do I download the Real-ESRGAN ONNX model for use with Java ONNX Runtime on a Mac? " +
-            "Shell commands: mkdir ~/.config/album-organizer/models/, " +
+            "How do I download the Real-ESRGAN ONNX model for use with Java ONNX Runtime? " +
+            "Create the models directory at: " + com.albumorganizer.util.AppDirs.modelsDir() + ", " +
             "download RealESRGAN_x4plus.onnx from github.com/xinntao/Real-ESRGAN releases via curl, " +
             "and verify the file size"),
             0, il, 2, 1); il++;
@@ -320,7 +320,8 @@ public class SettingsDialog extends Dialog<SettingsDialog.Result> {
         imageLocalGrid.add(new Label("Model path:"), 0, il);
         realEsrganPathField = new TextField(currentEnhancement.realEsrganModelPath());
         realEsrganPathField.setPrefWidth(300);
-        realEsrganPathField.setPromptText("~/.config/album-organizer/models/RealESRGAN_x4plus.onnx");
+        realEsrganPathField.setPromptText(
+            com.albumorganizer.util.AppDirs.modelsDir().resolve("RealESRGAN_x4plus.onnx").toString());
         imageLocalGrid.add(lookupField(realEsrganPathField, "realesrgan-ncnn-vulkan"), 1, il); il++;
         bindToCheck(realEsrganEnabledCheck, realEsrganPathField);
         imageLocalGrid.add(new Separator(), 0, il, 2, 1); il++;

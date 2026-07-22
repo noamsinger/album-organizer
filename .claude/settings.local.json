@@ -47,7 +47,10 @@
       "WebFetch(domain:docs.pika.art)",
       "WebFetch(domain:docs.dev.runwayml.com)",
       "WebFetch(domain:docs.topazlabs.com)",
-      "WebFetch(domain:klingai.com)"
+      "WebFetch(domain:klingai.com)",
+      "Bash(mvn javafx:run --version)",
+      "Bash(bash build.sh)",
+      "Bash(target/dist/AlbumOrganizer.app/Contents/MacOS/AlbumOrganizer)"
     ]
   }
 }

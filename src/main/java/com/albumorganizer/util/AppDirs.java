@@ -4,17 +4,23 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 /**
- * Resolves OS-appropriate directories for logs, caches, config, and reports.
+ * Resolves OS-appropriate directories for config, logs, caches, reports, and models.
  *
- * Mac:     logs    → ~/Library/Logs/album-organizer/
+ * Mac:     config  → ~/Library/Application Support/album-organizer/
+ *          logs    → ~/Library/Logs/album-organizer/
  *          reports → ~/Library/Logs/album-organizer/reports/
  *          cache   → ~/Library/Caches/album-organizer/
- * Windows: logs    → %APPDATA%\album-organizer\logs\
+ *          models  → ~/Library/Application Support/album-organizer/models/
+ * Windows: config  → %APPDATA%\album-organizer\
+ *          logs    → %APPDATA%\album-organizer\logs\
  *          reports → %APPDATA%\album-organizer\reports\
  *          cache   → %LOCALAPPDATA%\album-organizer\thumbnails\
- * Linux:   logs    → ~/.local/share/album-organizer/logs/
+ *          models  → %APPDATA%\album-organizer\models\
+ * Linux:   config  → ~/.config/album-organizer/
+ *          logs    → ~/.local/share/album-organizer/logs/
  *          reports → ~/.local/share/album-organizer/reports/
  *          cache   → ~/.cache/album-organizer/thumbnails/
+ *          models  → ~/.config/album-organizer/models/
  */
 public final class AppDirs {
 
@@ -23,6 +29,22 @@ public final class AppDirs {
     private static final String OS   = System.getProperty("os.name", "").toLowerCase();
 
     private AppDirs() {}
+
+    public static Path configDir() {
+        if (isMac()) {
+            return Paths.get(HOME, "Library", "Application Support", APP);
+        } else if (isWindows()) {
+            String appData = System.getenv("APPDATA");
+            if (appData != null) return Paths.get(appData, APP);
+            return Paths.get(HOME, "AppData", "Roaming", APP);
+        } else {
+            return Paths.get(HOME, ".config", APP);
+        }
+    }
+
+    public static Path modelsDir() {
+        return configDir().resolve("models");
+    }
 
     public static Path logsDir() {
         if (isMac()) {

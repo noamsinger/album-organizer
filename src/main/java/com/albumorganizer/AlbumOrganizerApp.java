@@ -68,14 +68,7 @@ public class AlbumOrganizerApp extends Application {
             // Setup stage
             primaryStage.setTitle("Album Organizer");
             primaryStage.setScene(scene);
-
-            // Restore window position if saved
-            double x = usage.windowX();
-            double y = usage.windowY();
-            if (x >= 0 && y >= 0) {
-                primaryStage.setX(x);
-                primaryStage.setY(y);
-            }
+            primaryStage.setMaximized(true);
 
             // Save window size and position on close, and save snapshot
             primaryStage.setOnCloseRequest(event -> {
@@ -134,6 +127,7 @@ public class AlbumOrganizerApp extends Application {
         // Set macOS application name (appears in menu bar)
         System.setProperty("apple.awt.application.name", "Album Organizer");
         System.setProperty("com.apple.mrj.application.apple.menu.about.name", "Album Organizer");
+        System.setProperty("apple.laf.useScreenMenuBar", "true");
 
         // Set macOS Dock icon
         try {

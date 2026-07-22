@@ -158,6 +158,14 @@ iconutil -c icns "$ICONSET" -o target/app-icon.icns
 APP_BUNDLE="target/dist/AlbumOrganizer.app"
 DMG_FILE="target/dist/AlbumOrganizer-1.5.0.dmg"
 
+# Collect JavaFX mac-aarch64 jars for module path
+FX_MODS_PATH=""
+for mod in base graphics controls fxml swing; do
+  jar=$(find ~/.m2/repository/org/openjfx/javafx-${mod} -name "*mac-aarch64.jar" 2>/dev/null | sort -V | tail -1)
+  [ -n "$jar" ] && FX_MODS_PATH="${FX_MODS_PATH}:${jar}"
+done
+FX_MODS_PATH="${FX_MODS_PATH#:}"
+
 echo "Building macOS app bundle..."
 rm -rf "target/dist"
 cp target/album-organizer-1.0.0.jar target/lib/
@@ -165,13 +173,16 @@ jpackage \
     --type app-image \
     --name "AlbumOrganizer" \
     --app-version "1.5.0" \
+    --module-path "$FX_MODS_PATH" \
+    --add-modules javafx.controls,javafx.fxml,javafx.swing,java.net.http,java.desktop,java.naming,java.sql,jdk.crypto.ec \
     --input target/lib \
     --main-jar album-organizer-1.0.0.jar \
     --main-class com.albumorganizer.AlbumOrganizerApp \
     --icon target/app-icon.icns \
     --dest target/dist \
     --java-options "-Dfile.encoding=UTF-8" \
-    --java-options "-Dapple.awt.application.name=AlbumOrganizer"
+    --java-options "-Dapple.awt.application.name=AlbumOrganizer" \
+    --java-options "-Dapple.laf.useScreenMenuBar=true"
 rm target/lib/album-organizer-1.0.0.jar
 
 echo "Building macOS installer (.dmg)..."

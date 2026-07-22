@@ -10,7 +10,7 @@
 
     <!-- Top: Menu Bar -->
     <top>
-        <MenuBar useSystemMenuBar="false" styleClass="menu-bar">
+        <MenuBar useSystemMenuBar="true" styleClass="menu-bar">
             <Menu text="File" onShowing="#onFileMenuShowing">
                 <MenuItem text="Add Album Folder" onAction="#onSelectFolders" fx:id="menuSelectFolders"/>
                 <SeparatorMenuItem/>
@@ -20,7 +20,7 @@
                 <SeparatorMenuItem/>
                 <MenuItem fx:id="menuEnhanceFromClipboard" text="AI-Enhance from Clipboard" onAction="#onEnhanceFromClipboard" disable="true"/>
                 <SeparatorMenuItem/>
-                <MenuItem text="Settings..." onAction="#onSettings"/>
+                <MenuItem text="Preferences..." onAction="#onSettings"/>
                 <SeparatorMenuItem/>
                 <MenuItem text="Exit" onAction="#onExit"/>
             </Menu>
@@ -73,7 +73,7 @@
                     <RadioMenuItem text="Warn" fx:id="logLevelWarnMenuItem" onAction="#onSetLogLevelWarn" toggleGroup="$logLevelToggleGroup"/>
                 </Menu>
                 <SeparatorMenuItem/>
-                <MenuItem text="About" onAction="#onAbout"/>
+                <MenuItem text="About Album Organizer" onAction="#onAbout"/>
             </Menu>
         </MenuBar>
     </top>
